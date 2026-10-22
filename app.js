@@ -110,6 +110,8 @@
     toasts: $('toasts')
   };
 
+  var lastTransportError = null;
+
   function showToast(message, type, timeout) {
     if (!els.toasts) return;
     var toast = document.createElement('div');
@@ -1305,10 +1307,14 @@
               if (status === 'connected') {
                 state.connected = true;
                 warnedOutage = false;
+                lastTransportError = null;
+                els.netChip.title = '';
                 setNetChip('ok', 'Conectado');
                 startPresence();
               } else if (status === 'reconnecting') {
                 state.connected = false;
+                lastTransportError = detail;
+                els.netChip.title = detail;
                 setNetChip('warn', 'Reconectando…');
                 if (!warnedOutage) {
                   warnedOutage = true;
@@ -1316,6 +1322,8 @@
                 }
               } else if (status === 'error') {
                 state.connected = false;
+                lastTransportError = detail;
+                els.netChip.title = detail;
                 setNetChip('err', 'Sem conexão');
                 console.error('[YKS] transporte:', detail);
                 if (!warnedOutage) {
@@ -1344,6 +1352,8 @@
         setNetChip('err', 'Erro');
 
         var detail = (err && err.status) ? describeInitError(err) : ((err && err.message) || err);
+        lastTransportError = detail;
+        els.netChip.title = detail;
         showToast(
           'Não foi possível iniciar a Activity: ' + detail,
           'error', 12000
