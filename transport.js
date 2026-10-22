@@ -1,31 +1,8 @@
-/* ==========================================================================
- * YKS-Screen — transportes de mídia
- * --------------------------------------------------------------------------
- * Duas implementações, mesma interface:
- *
- *   'mqtt'      (padrão) broker MQTT público — 100% estático, sem servidor;
- *   'socketio'  (opcional) relay próprio (relay/server.js).
- *
- *   YKS_TRANSPORT.create({
- *     kind, room, user, guildId,
- *     mqttPrefix, brokerUrls,
- *     relayUrl, socketPath, socketIoSources,
- *     subscribeMedia,      // false = não recebe o fluxo de vídeo de volta
- *     stats,
- *     onStatus(status, detail), onMeta(meta), onMedia(meta, bytes)
- *   })
- *
- * O transporte é um "bus" burro: não entende nada do conteúdo, só repassa.
- * ========================================================================== */
-
 (function () {
   'use strict';
 
   var F = window.YKS_FRAMES;
 
-  /* Carrega um script clássico, tentando as fontes em ordem.
-     Após o carregamento, valida que o global esperado existe — assim uma
-     fonte que responde 200 com HTML (ex.: fallback de SPA) não "passa". */
   function loadScript(sources, globalName) {
     return sources.reduce(function (chain, src) {
       return chain.catch(function () {
@@ -51,9 +28,6 @@
     }, Promise.reject(new Error('nenhuma fonte')));
   }
 
-  /* Normaliza o payload binário do Socket.IO. Em alguns ambientes ele chega
-     como Blob, e "new Uint8Array(blob)" resultaria num array VAZIO (sem erro
-     visível — só a mídia que nunca apareceria). */
   function toBytes(buffer, done) {
     if (!buffer) return done(new Uint8Array(0));
     if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(buffer)) return done(buffer);
@@ -65,24 +39,12 @@
     return done(new Uint8Array(0));
   }
 
-  /* --- Transporte MQTT (padrão): broker público, sem servidor próprio ---- */
   function createMqttTransport(opts) {
     var topicBase = opts.mqttPrefix + '/' + opts.room;
     var urls = opts.brokerUrls.slice();
     var client = null;
     var subscribeMedia = opts.subscribeMedia !== false;
 
-    /* Dentro do proxy do Discord o browser NÃO pode falar direto com o
-       broker: a CSP do proxy só autoriza WebSocket em
-       wss://<client_id>.discordsays.com/ (porta 443). Por isso, quando o
-       proxyBase vem preenchido, a URL do WebSocket é a do PRÓPRIO proxy,
-       com o prefixo do URL Mapping na frente:
-
-         wss://<client_id>.discordsays.com/broker/mqtt
-           -> o proxy encaminha para broker.emqx.io:8084/mqtt
-
-     (o remapeamento automático do SDK não serve aqui: ele preserva a porta
-     do destino e a CSP bloqueia tudo que não seja a porta 443 do proxy). */
     if (opts.proxyBase && opts.proxyPath) {
       urls = [opts.proxyBase.replace(/\/+$/, '') + opts.proxyPath + '/mqtt'];
     }
@@ -94,10 +56,6 @@
         return;
       }
 
-      /* Quantas falhas seguidas este broker acumulou. O cliente MQTT só
-         reporta "reconnecting" quando o handshake falha (nunca "error"),
-         então sem contar as falhas o app ficava preso no PRIMEIRO broker da
-         lista — que, dentro do Discord, é a URL do proxy. */
       var failures = 0;
 
       client = new window.MqttClient({
@@ -113,15 +71,14 @@
           } else if (status === 'reconnecting') {
             failures++;
             opts.onStatus('reconnecting', detail);
-            /* Duas falhas seguidas e ainda há broker na lista: tenta o
-               próximo. */
+
             if (failures >= 2 && urls.length) {
-              try { client.disconnect(); } catch (e) { /* ignora */ }
+              try { client.disconnect(); } catch (e) {  }
               connectNext();
             }
           } else if (status === 'error') {
             opts.onStatus('error', detail);
-            /* tenta o próximo broker */
+
             if (url) connectNext();
           }
         },
@@ -148,8 +105,7 @@
         if (opts.stats) opts.stats.metaOut++;
         client.publish(topicBase + '/ctrl', F.textEncoder.encode(JSON.stringify(meta)));
       },
-      /* Versão confiável (QoS 1): espera o PUBACK do broker. Usada na
-         mensagem de saída, que não pode se perder. */
+
       sendMetaAck: function (meta) {
         if (!client) return Promise.resolve(false);
         if (opts.stats) opts.stats.metaOut++;
@@ -165,17 +121,12 @@
     };
   }
 
-  /* --- Transporte Socket.IO (opcional): relay próprio ------------------- */
   function createSocketIoTransport(opts) {
     var socket = null;
 
     loadScript(opts.socketIoSources, 'io').then(function () {
       if (typeof window.io !== 'function') throw new Error('Socket.IO indisponível.');
 
-      /* relayUrl = origem (ex.: wss://<client_id>.discordsays.com) e
-         socketPath = caminho completo do Socket.IO (ex.: /relay/ws).
-         Dentro do proxy, o prefixo /relay faz o proxy encaminhar para
-         <host>/ws — é o mesmo relay, visto do outro lado. */
       socket = window.io(opts.relayUrl, {
         path: opts.socketPath,
         transports: ['websocket'],
@@ -202,7 +153,7 @@
         if (opts.stats) opts.stats.metaOut++;
         socket.emit('meta', meta);
       },
-      /* O relay não implementa confirmação de entrega. */
+
       sendMetaAck: function () { return Promise.resolve(false); },
       sendMedia: function (meta, payload) {
         if (!socket) return;

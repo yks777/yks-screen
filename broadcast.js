@@ -1,34 +1,10 @@
-/* ==========================================================================
- * YKS-Screen — publicador de mídia
- * --------------------------------------------------------------------------
- * Pipeline de publicação, compartilhado pela Activity (app.js) e pela aba
- * companheira (capture.js):
- *
- *   MediaStream -> WebCodecs VideoEncoder (VP8) / PCM 16 kHz
- *               -> frames binários -> transporte (MQTT ou relay)
- *
- * Este módulo não sabe nada de UI: apenas gerencia o encoder, as tracks e
- * os frames. Quem chama recebe eventos (onState / onStopped).
- *
- *   YKS_BROADCAST.publish({
- *     stream, type, user, sid, transport,
- *     video: {width, height, framerate, bitrate, codec},
- *     audio: {sampleRate},
- *     stats, isMuted(), onState(kind, msg), onStopped(type)
- *   })
- * ========================================================================== */
-
 (function () {
   'use strict';
 
   var F = window.YKS_FRAMES;
 
-  /* type -> publicador ativo */
   var publishers = {};
 
-  /* --------------------------------------------------------------------------
-   * Publica uma MediaStream.
-   * ------------------------------------------------------------------------ */
   function publish(opts) {
     var pub = {
       type: opts.type,
@@ -63,7 +39,6 @@
       startAudioPublisher(pub, audioTrack, opts);
     }
 
-    /* Quando o usuário para o compartilhamento pela UI do navegador. */
     pub.onEnded = function () {
       if (pub.active) stop(opts.type);
     };
@@ -74,9 +49,6 @@
     return pub;
   }
 
-  /* --------------------------------------------------------------------------
-   * Codifica os frames do vídeo com WebCodecs (VP8) e envia pelo transporte.
-   * ------------------------------------------------------------------------ */
   function startVideoPublisher(pub, track, opts) {
     if (typeof window.VideoEncoder === 'undefined') {
       throw new Error('WebCodecs (VideoEncoder) não está disponível neste navegador.');
@@ -119,12 +91,12 @@
 
         function encodeNow() {
           if (!pub.active || !encoder || encoder.state !== 'configured') return;
-          /* Não enfileira demais: mantém a latência baixa. */
+
           if (encoder.encodeQueueSize >= 3) return;
 
           var w = video.videoWidth, h = video.videoHeight;
           if (w && h && (w !== pub.width || h !== pub.height)) {
-            /* A resolução mudou (ex.: redimensionou a janela): reconfigura. */
+
             pub.width = w; pub.height = h;
             try {
               encoder.configure({
@@ -132,11 +104,9 @@
                 bitrate: cfg.bitrate,
                 framerate: cfg.framerate, latencyMode: 'realtime'
               });
-            } catch (e) { /* mantém a config anterior */ }
+            } catch (e) {  }
           }
 
-          /* Keyframe sob demanda: quem chega no meio da transmissão precisa
-             de um quadro completo para decodificar. */
           var forceKey = pub.wantKeyFrame;
           pub.wantKeyFrame = false;
 
@@ -154,7 +124,6 @@
           }
         }
 
-        /* Caminho preferencial: um encode por frame novo da captura. */
         function pumpByFrameCallback() {
           if (!pub.active) return;
           encodeNow();
@@ -165,8 +134,6 @@
           video.requestVideoFrameCallback(pumpByFrameCallback);
         }
 
-        /* Watchdog: se o requestVideoFrameCallback não disparar, continuamos
-           codificando por temporizador. */
         pub.watchdog = window.setInterval(function () {
           if (pub.active && Date.now() - lastEncode > 400) encodeNow();
         }, 200);
@@ -192,9 +159,6 @@
     }, data);
   }
 
-  /* --------------------------------------------------------------------------
-   * Captura o áudio, converte para PCM 16 kHz mono e envia pelo transporte.
-   * ------------------------------------------------------------------------ */
   function startAudioPublisher(pub, track, opts) {
     var Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
@@ -203,7 +167,7 @@
     var source = ctx.createMediaStreamSource(new MediaStream([track]));
     var processor = ctx.createScriptProcessor(4096, 1, 1);
     var sink = ctx.createGain();
-    sink.gain.value = 0;              /* evita eco no microfone local */
+    sink.gain.value = 0;
 
     processor.onaudioprocess = function (event) {
       if (!pub.active) return;
@@ -230,7 +194,6 @@
     pub.audio = { ctx: ctx, processor: processor, source: source, sink: sink };
   }
 
-  /* Converte Float32 -> PCM 16 bits, reamostrando para a taxa alvo. */
   function downsampleToPcm16(input, inRate, outRate) {
     if (inRate === outRate) {
       var same = new Int16Array(input.length);
@@ -256,20 +219,17 @@
     return out;
   }
 
-  /* --------------------------------------------------------------------------
-   * Encerra a publicação de um tipo ('screen' | 'camera').
-   * ------------------------------------------------------------------------ */
   function stop(type) {
     var pub = publishers[type];
     if (!pub) return null;
     pub.active = false;
 
-    if (pub.video) { try { pub.video.close(); } catch (e) { /* ignora */ } }
+    if (pub.video) { try { pub.video.close(); } catch (e) {  } }
     if (pub.watchdog) { clearInterval(pub.watchdog); pub.watchdog = null; }
     if (pub.audio) {
-      try { pub.audio.processor.disconnect(); } catch (e) { /* ignora */ }
-      try { pub.audio.source.disconnect(); } catch (e) { /* ignora */ }
-      try { pub.audio.ctx.close(); } catch (e) { /* ignora */ }
+      try { pub.audio.processor.disconnect(); } catch (e) {  }
+      try { pub.audio.source.disconnect(); } catch (e) {  }
+      try { pub.audio.ctx.close(); } catch (e) {  }
     }
     if (pub.videoEl) {
       pub.videoEl.srcObject = null;
@@ -278,7 +238,7 @@
     if (pub.stream) {
       pub.stream.getTracks().forEach(function (t) {
         if (pub.onEnded) t.removeEventListener('ended', pub.onEnded);
-        try { t.stop(); } catch (e) { /* ignora */ }
+        try { t.stop(); } catch (e) {  }
       });
     }
 
@@ -287,7 +247,6 @@
     return pub;
   }
 
-  /* Pede que o próximo quadro codificado seja um keyframe. */
   function requestKeyFrame(type) {
     var pub = publishers[type];
     if (!pub) return false;

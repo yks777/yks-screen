@@ -7,22 +7,11 @@
   <meta name="description" content="YKS-Screen: sala de reunião P2P por WebSocket para Discord Activities. Compartilhe tela e câmera.">
   <meta name="theme-color" content="#080808">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23080808'/%3E%3Crect x='11' y='11' width='10' height='10' rx='3' fill='%23ff2b1b'/%3E%3C/svg%3E">
-  <!--
-    VERSÃO DOS ARQUIVOS (cache-busting)
-    -----------------------------------
-    Troque a data/versão abaixo a CADA publicação. Sem isso, o cache do
-    navegador e o cache do proxy do Discord (discordsays.com) podem servir
-    um app.js antigo — foi assim que apareceu "Application ID do Discord não
-    configurado" depois de trocar o clientId no código.
-  -->
+
   <link rel="stylesheet" href="styles.css?v=20261022-2">
 </head>
 <body>
 
-  <!-- ============================================================
-       SPLASH SCREEN — "Sharing Spinner" (disco vermelho girando).
-       CSS puro em styles.css, sem dependências. Fica por ~3s.
-       ============================================================ -->
   <div class="splash" id="splash" role="status" aria-live="polite">
     <div class="loader" id="loader" aria-hidden="true">
       <div class="sharingon">
@@ -39,16 +28,13 @@
     <p class="splash__hint">entrando na sala…</p>
   </div>
 
-  <!-- ============================================================
-       INTERFACE DA SALA
-       ============================================================ -->
   <div class="app" id="app">
 
     <header class="topbar">
       <div class="brand">
         <span class="brand__mark" aria-hidden="true"></span>
         <span class="brand__name">YKS<span>-Screen</span></span>
-        <!-- reaproveita o .record / .record-text do loader (ponto que pisca) -->
+
         <span class="head-rec">
           <span class="record"></span>
           <span class="record-text">REC</span>
@@ -62,7 +48,7 @@
     </header>
 
     <main class="stage">
-      <!-- grade de vídeos (telas e câmeras) -->
+
       <section class="grid" id="grid" aria-label="Participantes da sala">
         <div class="grid__empty">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
@@ -77,7 +63,6 @@
         </div>
       </section>
 
-      <!-- lista de participantes -->
       <aside class="roster" aria-label="Participantes">
         <h2 class="roster__title">Participantes <span class="roster__count" id="rosterCount">0</span></h2>
         <ul class="roster__list" id="rosterList"></ul>
@@ -126,11 +111,8 @@
     </footer>
   </div>
 
-  <!-- Toasts (feedback de erros/sucesso) -->
   <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
 
-  <!-- Link manual da aba companheira (usado quando o navegador bloqueia a
-       abertura automática de uma nova aba) -->
   <div class="companion" id="companionLink" hidden>
     <p class="companion__text">
       Abra este link no navegador para compartilhar sua tela:
@@ -145,14 +127,6 @@
     <div class="noscript">O YKS-Screen precisa de JavaScript ativado para funcionar.</div>
   </noscript>
 
-  <!-- ============================================================
-       Bibliotecas externas (CDN, sem build).
-       Dentro do Discord, carregue via URL Mappings (/sdk e /socketio)
-       para não ser bloqueado pela CSP do proxy — o app.js já tenta
-       as duas opções (mapeado primeiro, CDN direto depois).
-       ============================================================ -->
-
-  <!-- Cliente MQTT 3.1.1 mínimo (sem dependências) — transporte padrão -->
   <script src="mqtt.js?v=20261022-2"></script>
   <script src="config.js?v=20261022-2"></script>
   <script src="frames.js?v=20261022-2"></script>

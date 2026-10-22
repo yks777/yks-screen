@@ -1,40 +1,6 @@
-/* ==========================================================================
- * YKS-Screen — cliente MQTT 3.1.1 mínimo sobre WebSocket
- * --------------------------------------------------------------------------
- * Implementação sem dependências (sem npm, sem CDN) do subconjunto do MQTT
- * necessário para o YKS-Screen:
- *
- *   CONNECT / CONNACK
- *   SUBSCRIBE / SUBACK
- *   PUBLISH (QoS 0 — fire & forget, menor latência)
- *   PINGREQ / PINGRESP
- *   DISCONNECT
- *
- * Por que MQTT: o YKS-Screen precisa de um "bus" que transporte MÍDIA
- * (frames binários) entre os participantes de uma sala, sem que ninguém
- * precise rodar um servidor. Um broker MQTT público (gratuito, sem conta)
- * faz exatamente isso: é um pub/sub que só repassa as mensagens.
- *
- * A mídia trafega em tópicos como "yks/<chave-da-sala>/media" e o controle
- * de presença em "yks/<chave-da-sala>/ctrl".
- *
- * Uso:
- *   var mqtt = new MqttClient({
- *     url: 'wss://broker.emqx.io:8084/mqtt',
- *     clientId: 'yks-abcd1234',
- *     onStatus: function (s) {},      // connecting|connected|reconnecting|error|closed
- *     onMessage: function (topic, bytes) {}
- *   });
- *   mqtt.connect();
- *   mqtt.subscribe('yks/abc/media');
- *   mqtt.publish('yks/abc/media', new Uint8Array([1,2,3]));
- *   mqtt.disconnect();
- * ========================================================================== */
-
 (function (global) {
   'use strict';
 
-  /* Nomes dos pacotes MQTT 3.1.1 */
   var PKT = {
     CONNECT: 1, CONNACK: 2, PUBLISH: 3, PUBACK: 4,
     SUBSCRIBE: 8, SUBACK: 9, UNSUBSCRIBE: 10, UNSUBACK: 11,
@@ -44,9 +10,6 @@
   var encoder = new TextEncoder();
   var decoder = new TextDecoder();
 
-  /* ----------------------------------------------------------------------
-   * Codificação do "Remaining Length" (inteiro variável, 1-4 bytes)
-   * -------------------------------------------------------------------- */
   function encodeLength(len) {
     var bytes = [];
     do {
@@ -58,9 +21,6 @@
     return new Uint8Array(bytes);
   }
 
-  /* ----------------------------------------------------------------------
-   * String MQTT = 2 bytes de tamanho (big endian) + os bytes UTF-8
-   * -------------------------------------------------------------------- */
   function encodeString(str) {
     var raw = encoder.encode(str);
     var out = new Uint8Array(2 + raw.length);
@@ -78,16 +38,12 @@
     return out;
   }
 
-  /* ======================================================================
-   * Cliente
-   * ====================================================================== */
-
   function MqttClient(options) {
     options = options || {};
     this.url = options.url;
     this.clientId = options.clientId || ('yks-' + Math.random().toString(36).slice(2, 10));
     this.keepalive = options.keepalive || 30;
-    /* Alguns brokers exigem o subprotocolo "mqtt"; outros o rejeitam. */
+
     this.protocols = options.protocols === null ? [] : ['mqtt'];
 
     this.onStatus = options.onStatus || function () {};
@@ -98,8 +54,8 @@
     this.connected = false;
     this.closed = false;
     this.packetId = 0;
-    this.pending = [];        /* tópicos ainda não assinados */
-    this.pendingAcks = {};    /* packetId -> callback (QoS 1) */
+    this.pending = [];
+    this.pendingAcks = {};
     this.buffer = new Uint8Array(0);
     this.keepaliveTimer = null;
     this.reconnectDelay = 1000;
@@ -116,9 +72,6 @@
     return this.packetId;
   };
 
-  /* ----------------------------------------------------------------------
-   * Conexão
-   * -------------------------------------------------------------------- */
   MqttClient.prototype.connect = function () {
     var self = this;
     this.closed = false;
@@ -135,9 +88,7 @@
 
     this.ws = ws;
 
-    /* No navegador, frames binários chegam como Blob por padrão.
-       Forçamos ArrayBuffer para poder processá-los de forma síncrona. */
-    try { ws.binaryType = 'arraybuffer'; } catch (e) { /* ignora */ }
+    try { ws.binaryType = 'arraybuffer'; } catch (e) {  }
 
     ws.onopen = function () {
       self._sendConnect();
@@ -149,7 +100,7 @@
       else if (data instanceof ArrayBuffer) data = new Uint8Array(data);
       else if (data && data.buffer instanceof ArrayBuffer) data = new Uint8Array(data.buffer);
       else if (data && typeof data.arrayBuffer === 'function') {
-        /* Blob: precisa ser convertido (assíncrono) */
+
         data.arrayBuffer().then(function (buf) { self._feed(new Uint8Array(buf)); });
         return;
       }
@@ -157,8 +108,7 @@
     };
 
     ws.onerror = function () {
-      /* O "close" seguinte traz o detalhe; guardamos algo útil aqui porque o
-         evento de erro do WebSocket não carrega mensagem no navegador. */
+
       self.lastError = 'falha no WebSocket';
     };
 
@@ -185,40 +135,28 @@
     }, this.reconnectDelay);
   };
 
-  /* ----------------------------------------------------------------------
-   * CONNECT (0x10)
-   * -------------------------------------------------------------------- */
   MqttClient.prototype._sendConnect = function () {
     var body = concat([
-      encodeString('MQTT'),            /* nome do protocolo */
-      new Uint8Array([0x04]),           /* nível: MQTT 3.1.1 */
-      new Uint8Array([0x02]),           /* flags: clean session */
+      encodeString('MQTT'),
+      new Uint8Array([0x04]),
+      new Uint8Array([0x02]),
       new Uint8Array([0x00, this.keepalive]),
       encodeString(this.clientId)
     ]);
     this._write(0x10, body);
   };
 
-  /* ----------------------------------------------------------------------
-   * SUBSCRIBE (0x82) — QoS 0
-   * -------------------------------------------------------------------- */
   MqttClient.prototype.subscribe = function (topic) {
     if (!this.connected) { this.pending.push(topic); return; }
     var id = this._nextPacketId();
     var body = concat([
       new Uint8Array([(id >> 8) & 0xff, id & 0xff]),
       encodeString(topic),
-      new Uint8Array([0x00])            /* QoS 0 */
+      new Uint8Array([0x00])
     ]);
     this._write(0x82, body);
   };
 
-  /* ----------------------------------------------------------------------
-   * PUBLISH (0x30 para QoS 0, 0x32 para QoS 1)
-   *   QoS 0: fire & forget (menor latência) — ideal para mídia.
-   *   QoS 1: o broker responde PUBACK — usado nas mensagens de CONTROLE,
-   *           que não podem se perder (ex.: "sai da sala").
-   * -------------------------------------------------------------------- */
   MqttClient.prototype.publish = function (topic, payload, opts) {
     if (!this.connected || !this.ws || this.ws.readyState !== 1) return false;
     var qos = (opts && opts.qos) || 0;
@@ -236,7 +174,6 @@
     return true;
   };
 
-  /* Aguarda o PUBACK de um publish QoS 1. */
   MqttClient.prototype.publishAck = function (topic, payload, timeoutMs) {
     var self = this;
     return new Promise(function (resolve, reject) {
@@ -264,9 +201,6 @@
     });
   };
 
-  /* ----------------------------------------------------------------------
-   * PINGREQ / DISCONNECT
-   * -------------------------------------------------------------------- */
   MqttClient.prototype._sendPing = function () {
     if (this.connected) this._write(0xC0, new Uint8Array(0));
   };
@@ -275,8 +209,8 @@
     this.closed = true;
     this._clearKeepalive();
     if (this.ws && this.ws.readyState === 1) {
-      try { this._write(0xE0, new Uint8Array(0)); } catch (e) { /* ignora */ }
-      try { this.ws.close(); } catch (e) { /* ignora */ }
+      try { this._write(0xE0, new Uint8Array(0)); } catch (e) {  }
+      try { this.ws.close(); } catch (e) {  }
     }
     this.connected = false;
   };
@@ -288,9 +222,6 @@
     }
   };
 
-  /* ----------------------------------------------------------------------
-   * Escrita de um pacote MQTT
-   * -------------------------------------------------------------------- */
   MqttClient.prototype._write = function (type, body) {
     if (!this.ws || this.ws.readyState !== 1) return;
     var header = new Uint8Array(1 + 4);
@@ -298,12 +229,9 @@
     var lenBytes = encodeLength(body.length);
     header.set(lenBytes, 1);
     var packet = concat([header.slice(0, 1 + lenBytes.length), body]);
-    try { this.ws.send(packet); } catch (e) { /* ignora */ }
+    try { this.ws.send(packet); } catch (e) {  }
   };
 
-  /* ----------------------------------------------------------------------
-   * Recepção: monta o stream de bytes e extrai os pacotes
-   * -------------------------------------------------------------------- */
   MqttClient.prototype._feed = function (chunk) {
     var merged = new Uint8Array(this.buffer.length + chunk.length);
     merged.set(this.buffer, 0);
@@ -318,20 +246,19 @@
       var digit;
 
       do {
-        if (index >= this.buffer.length) return;   /* pacote incompleto */
+        if (index >= this.buffer.length) return;
         digit = this.buffer[index++];
         value += (digit & 127) * multiplier;
         multiplier *= 128;
-        if (multiplier > 128 * 128 * 128) return;  /* malformado */
+        if (multiplier > 128 * 128 * 128) return;
       } while ((digit & 128) !== 0);
 
-      if (this.buffer.length < index + value) return;  /* payload incompleto */
+      if (this.buffer.length < index + value) return;
 
       var body = this.buffer.slice(index, index + value);
       var header = this.buffer[0];
       this.buffer = this.buffer.slice(index + value);
-      /* passa o PRIMEIRO BYTE do cabeçalho fixo: no PUBLISH ele carrega
-         as flags (dup/qos/retain), além do tipo. */
+
       this._handlePacket(header, body);
     }
   };
@@ -345,7 +272,7 @@
         this.connected = true;
         this.reconnectDelay = 1000;
         this._setStatus('connected');
-        /* assina os tópicos que ficaram pendentes */
+
         var pending = this.pending.slice();
         this.pending.length = 0;
         for (var i = 0; i < pending.length; i++) this.subscribe(pending[i]);
@@ -358,15 +285,12 @@
     }
 
     if (type === PKT.PUBLISH) {
-      /* Estrutura do PUBLISH (MQTT 3.1.1):
-         [1o byte: 0x3?|flags(qos)] [remaining length]
-         [tamanho do topico: 2 bytes] [topico]
-         [packet id, apenas se qos > 0] [payload] */
+
       var qos = (header & 0x06) >> 1;
       var topicLen = (body[0] << 8) | body[1];
       var topic = decoder.decode(body.slice(2, 2 + topicLen));
       var offset = 2 + topicLen;
-      if (qos > 0) offset += 2;               /* packet id */
+      if (qos > 0) offset += 2;
       var payload = body.slice(offset);
       this.onMessage(topic, payload);
       return;
@@ -392,6 +316,5 @@
     }, Math.max(5000, (this.keepalive * 1000) / 2));
   };
 
-  /* Exporta como global (script clássico, sem build) */
   global.MqttClient = MqttClient;
 })(window);

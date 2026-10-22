@@ -1,65 +1,27 @@
-/* ==========================================================================
- * YKS-Screen — diagnóstico de captura de mídia
- * --------------------------------------------------------------------------
- * Shared by app.js (Activity) and capture.js (aba companheira).
- *
- * Two distinct failures used to be reported with the same generic toast
- * ("Permissão negada"), which sent the user chasing browser settings that
- * could not fix anything:
- *
- *   1) the user dismissed the source picker (NotAllowedError);
- *   2) the page is inside a frame that is NOT allowed to use the Screen
- *      Capture API — Chromium rejects with NotAllowedError/SecurityError
- *      saying "Access to the feature "display-capture" is disallowed by
- *      permissions policy". This is what happens inside a Discord Activity,
- *      because Discord does not put allow="display-capture" on the iframe.
- *      No browser setting and no Developer Portal setting can fix it.
- *
- * YKS_ERRORS.canCaptureHere() answers "can I capture here?" BEFORE trying,
- * so we never call getDisplayMedia() in a doomed context.
- * ========================================================================== */
-
 (function () {
   'use strict';
 
-  /* --------------------------------------------------------------------------
-   * O documento atual tem permissão de usar a Screen Capture API?
-   *
-   * A Permissions-Policy "display-capture" tem como allowlist padrão "self":
-   * um iframe de outra origem (o do Discord) NÃO é permitido, a menos que o
-   * embedder use allow="display-capture". O Discord não usa.
-   * ------------------------------------------------------------------------ */
   function canCaptureHere() {
     var policy = document.permissionsPolicy || document.featurePolicy;
     if (policy && typeof policy.allowsFeature === 'function') {
       try {
         return !!policy.allowsFeature('display-capture');
       } catch (e) {
-        /* Feature desconhecida nesta versão: segue o fluxo normal e deixa o
-           erro real aparecer. */
+
       }
     }
-    /* Sem API de Permissions-Policy: não há como saber — tenta e trata. */
+
     return true;
   }
 
-  /* A mensagem do erro denuncia bloqueio por política? */
   function isPolicyMessage(msg) {
     return /permissions?\s+policy/i.test(msg || '');
   }
 
-  /* --------------------------------------------------------------------------
-   * Traduz o DOMException da captura em algo acionável.
-   *   blocked = true  -> o contexto proíbe a captura (use a aba companheira)
-   *   blocked = false -> problema do usuário/ambiente (repita ou ajuste)
-   * ------------------------------------------------------------------------ */
   function describeCaptureError(err) {
     var name = (err && err.name) || '';
     var msg = (err && err.message) || '';
 
-    /* Bloqueio por política de-frame: nem o seletor aparece. A mensagem do
-       navegador é decisiva aqui — quando ela cita a policy, o bloqueio é da
-       policy, mesmo que allowsFeature() responda diferente. */
     if (name === 'SecurityError' || isPolicyMessage(msg)) {
       return {
         blocked: true,
@@ -70,9 +32,7 @@
     }
 
     if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-      /* Em um iframe do Discord o erro também chega como NotAllowedError, mas
-         com a mensagem de política — nesse caso cai no bloco acima. Aqui é
-         o cancelamento do seletor (o caso mais comum). */
+
       return {
         blocked: false,
         title: 'Captura cancelada',

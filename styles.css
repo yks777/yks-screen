@@ -1,43 +1,21 @@
-/* ==========================================================================
-   YKS-Screen — styles.css
-   Tema escuro minimalista: preto + vermelho (#ff2b1b).
-   Sem dependências externas, sem build.
-
-   SUMÁRIO
-     1. Design tokens / reset
-     2. LOADER (Sharing Spinner)
-     3. Splash screen
-     4. Topbar
-     5. Palco (grade de vídeos) + roster
-     6. Controles
-     7. Toasts
-     8. Responsividade
-     9. prefers-reduced-motion
-   ========================================================================== */
-
-
-/* ==========================================================================
-   1. DESIGN TOKENS / RESET
-   ========================================================================== */
-
 :root {
-  /* Paleta: preto + vermelho. O vermelho é o ÚNICO acento. */
-  --c: #ff2b1b;                 /* acento principal (o vermelho do loader) */
-  --c-strong: #ff5a4d;          /* hover/realce */
+
+  --c: #ff2b1b;
+  --c-strong: #ff5a4d;
   --c-dim: rgba(255, 43, 27, .12);
   --c-line: rgba(255, 43, 27, .30);
-  --c-ring: rgba(150, 20, 12, .55); /* anel interno do loader */
+  --c-ring: rgba(150, 20, 12, .55);
 
-  --bg: #080808;                /* fundo da página */
-  --surface: #0f0f10;           /* cartões */
-  --surface-2: #151517;         /* campos, chips */
-  --surface-3: #1c1c1f;         /* hover */
-  --line: #232326;              /* bordas */
+  --bg: #080808;
+  --surface: #0f0f10;
+  --surface-2: #151517;
+  --surface-3: #1c1c1f;
+  --line: #232326;
   --line-soft: rgba(255, 255, 255, .06);
 
   --text: #f4f4f5;
-  --text-2: #a1a1a8;            /* secundário */
-  --text-3: #6e6e76;            /* terciário / labels */
+  --text-2: #a1a1a8;
+  --text-3: #6e6e76;
 
   --danger: #ff5f56;
 
@@ -88,32 +66,14 @@ button, input { font: inherit; color: inherit; }
   border-radius: 4px;
 }
 
-
-/* ==========================================================================
-   2. LOADER — "Sharing Spinner"
-   --------------------------------------------------------------------------
-   Portado 1:1 do componente de referência (disco vermelho girando com
-   três nós e núcleo central). O tamanho é controlado por `font-size` do
-   .loader (16px = 96px de diâmetro; 12px no mobile).
-
-   Mapeamento do JSX/HTML original:
-     .loader      -> palco que centraliza e escala a animação
-     .sharingon   -> disco vermelho girando (borda preta de 6px)
-     .ring        -> anel interno (vermelho escuro translúcido)
-     .to          -> nós (bolinhas pretas) nas 3 posições
-     .to::before  -> a "cauda" curva de cada nó
-     .circle      -> núcleo central preto com brilho
-   ========================================================================== */
-
 .loader {
-  font-size: 16px;              /* controla o tamanho de toda a animação */
+  font-size: 16px;
   display: grid;
   place-items: center;
   width: 100%;
   height: 100%;
 }
 
-/* ------- disco vermelho girando ------- */
 .sharingon {
   position: relative;
   width: 6em;
@@ -124,7 +84,6 @@ button, input { font: inherit; color: inherit; }
   animation: rot 1s ease-in-out infinite;
 }
 
-/* ------- anel interno ------- */
 .ring {
   position: absolute;
   left: 50%;
@@ -136,7 +95,6 @@ button, input { font: inherit; color: inherit; }
   transform: translate(-50%, -50%);
 }
 
-/* ------- nós (bolinhas) ------- */
 .to,
 .circle {
   position: absolute;
@@ -175,7 +133,6 @@ button, input { font: inherit; color: inherit; }
   transform: rotate(120deg);
 }
 
-/* ------- núcleo central ------- */
 .circle {
   top: 50%;
   left: 50%;
@@ -185,7 +142,6 @@ button, input { font: inherit; color: inherit; }
   box-shadow: 0 0 20px 1px;
 }
 
-/* ------- rotação ------- */
 @keyframes rot {
   0%   { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
@@ -194,9 +150,6 @@ button, input { font: inherit; color: inherit; }
 @media (max-width: 480px) {
   .loader { font-size: 12px; }
 }
-/* ==========================================================================
-   3. SPLASH SCREEN
-   ========================================================================== */
 
 .splash {
   position: fixed;
@@ -213,7 +166,6 @@ button, input { font: inherit; color: inherit; }
   pointer-events: none;
 }
 
-/* o atributo [hidden] precisa vencer o display: grid acima */
 .splash[hidden] { display: none; }
 
 .splash__brand {
@@ -250,11 +202,6 @@ button, input { font: inherit; color: inherit; }
   50%      { opacity: 1; }
 }
 
-
-/* ==========================================================================
-   4. TOPBAR
-   ========================================================================== */
-
 .app {
   display: flex;
   flex-direction: column;
@@ -288,7 +235,6 @@ body.is-ready .app {
   backdrop-filter: blur(12px);
 }
 
-/* --- marca ------------------------------------------------------------ */
 .brand {
   display: flex;
   align-items: center;
@@ -315,7 +261,6 @@ body.is-ready .app {
 
 .brand__name span { color: var(--c); }
 
-/* selo REC: ponto que pisca + rótulo */
 .head-rec {
   display: inline-flex;
   align-items: center;
@@ -350,7 +295,6 @@ body.is-ready .app {
   75%, 100% { opacity: 1; }
 }
 
-/* --- status ------------------------------------------------------------ */
 .topbar__meta {
   display: flex;
   align-items: center;
@@ -399,20 +343,15 @@ body.is-ready .app {
   50%      { opacity: .35; transform: scale(.7); }
 }
 
-/* ==========================================================================
-   5. PALCO (grade de vídeos) + ROSTER
-   ========================================================================== */
-
 .stage {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 264px;
   gap: 24px;
-  align-items: stretch;   /* a grade ocupa a altura disponível */
+  align-items: stretch;
   flex: 1 1 auto;
   min-height: calc(100vh - 190px);
 }
 
-/* --- grade de tiles ---------------------------------------------------- */
 .grid {
   display: flex;
   flex-wrap: wrap;
@@ -428,7 +367,6 @@ body.is-ready .app {
   align-content: center;
 }
 
-/* estado vazio: só aparece quando não há nenhum tile */
 .grid:not(.is-empty) .grid__empty { display: none; }
 
 .grid__empty {
@@ -461,7 +399,6 @@ body.is-ready .app {
 .grid__empty-hint { color: var(--text-3); font-size: 13px; }
 .grid__empty-hint strong { color: var(--c); font-weight: 600; }
 
-/* --- tile -------------------------------------------------------------- */
 .tile {
   position: relative;
   flex: 1 1 260px;
@@ -482,8 +419,6 @@ body.is-ready .app {
   box-shadow: var(--shadow), 0 0 0 1px rgba(247, 151, 29, .08);
 }
 
-/* Layout "palco": quando alguém compartilha a tela, ela vira o protagonista
-   (ocupa toda a largura) e as câmeras ficam numa faixa centralizada abaixo. */
 .grid.has-screen {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 200px));
@@ -493,7 +428,7 @@ body.is-ready .app {
 
 .grid.has-screen .tile--screen {
   grid-column: 1 / -1;
-  /* largura derivada da altura disponível (sem % cíclico) -> sem tarja preta */
+
   width: min(100%, calc(50vh * 16 / 9));
   aspect-ratio: 16 / 9;
   min-width: 0;
@@ -518,7 +453,6 @@ body.is-ready .app {
   display: block;
 }
 
-/* o vídeo local fica sobre o canvas (o canvas só é usado no remoto) */
 .tile--local .tile__canvas { display: none; }
 .tile:not(.tile--local) .tile__video { display: none; }
 
@@ -534,7 +468,6 @@ body.is-ready .app {
   background: radial-gradient(circle at 50% 38%, #17171a, #0c0c0e);
 }
 
-/* assim que houver imagem, o placeholder some */
 .tile.is-live .tile__placeholder { display: none; }
 
 .tile__meta {
@@ -570,7 +503,7 @@ body.is-ready .app {
 
 .tile__tag {
   margin-left: auto;
-  /* fundo escuro + blur: legível sobre qualquer conteúdo da mídia */
+
   background: rgba(8, 8, 8, .68);
   border: 1px solid var(--c-line);
   color: var(--c);
@@ -579,7 +512,6 @@ body.is-ready .app {
   letter-spacing: .14em;
 }
 
-/* selo "ao vivo" no tile de tela compartilhada */
 .tile__live {
   position: absolute;
   top: 10px;
@@ -610,7 +542,6 @@ body.is-ready .app {
   animation: pulse 1.6s var(--ease) infinite;
 }
 
-/* --- roster ------------------------------------------------------------ */
 .roster {
   position: sticky;
   top: 84px;
@@ -716,7 +647,6 @@ body.is-ready .app {
   font-size: 13px;
 }
 
-/* --- código da sala (útil fora do Discord) ---------------------------- */
 .roomcode {
   margin-top: 16px;
   padding-top: 14px;
@@ -785,10 +715,6 @@ body.is-ready .app {
   line-height: 1.55;
 }
 
-/* ==========================================================================
-   6. CONTROLES
-   ========================================================================== */
-
 .controls {
   position: sticky;
   bottom: 20px;
@@ -848,12 +774,10 @@ body.is-ready .app {
   stroke-linejoin: round;
 }
 
-/* microfone: mostra o ícone "mudo" enquanto estiver silenciado */
 .ctl__icon .ico-mic-off { display: none; }
 #btnMic:not(.is-active) .ico-mic { display: none; }
 #btnMic:not(.is-active) .ico-mic-off { display: block; }
 
-/* estado ativo: laranja */
 .ctl.is-active {
   background: var(--c);
   border-color: var(--c);
@@ -862,7 +786,6 @@ body.is-ready .app {
 
 .ctl.is-active:hover { background: var(--c-strong); }
 
-/* sair da sala: discreto, só fica vermelho no hover */
 .ctl--danger { color: var(--text-2); }
 .ctl--danger:hover { background: rgba(255, 95, 86, .1); color: var(--danger); }
 
@@ -870,14 +793,10 @@ body.is-ready .app {
 
 body.has-left .controls { opacity: .45; pointer-events: none; }
 
-/* ==========================================================================
-   7. TOASTS
-   ========================================================================== */
-
 .toasts {
   position: fixed;
   right: 20px;
-  bottom: 88px;   /* acima da barra de controles */
+  bottom: 88px;
   z-index: 9000;
   display: flex;
   flex-direction: column;
@@ -925,17 +844,10 @@ body.has-left .controls { opacity: .45; pointer-events: none; }
   to   { opacity: 0; transform: translateY(6px) scale(.98); }
 }
 
-/* ==========================================================================
-   7b. LINK DA ABA COMPANHEIRA
-   --------------------------------------------------------------------------
-   Aparece só quando o navegador impede a abertura automática de uma nova
-   aba (o link precisa ser aberto à mão).
-   ========================================================================== */
-
 .companion {
   position: fixed;
   right: 20px;
-  bottom: 88px;   /* acima da barra de controles */
+  bottom: 88px;
   z-index: 9500;
   width: min(420px, calc(100vw - 40px));
   padding: 14px;
@@ -982,10 +894,6 @@ body.has-left .controls { opacity: .45; pointer-events: none; }
 }
 
 .companion__copy:hover { background: rgba(255, 43, 27, .2); }
-
-/* ==========================================================================
-   8. RESPONSIVIDADE (iframe do Discord: desktop e mobile)
-   ========================================================================== */
 
 @media (max-width: 1080px) {
   .stage { grid-template-columns: 1fr; }
@@ -1034,10 +942,6 @@ body.has-left .controls { opacity: .45; pointer-events: none; }
   background: var(--bg);
   color: var(--text);
 }
-
-/* ==========================================================================
-   9. PREFERÊNCIAS DE MOVIMENTO REDUZIDO
-   ========================================================================== */
 
 @media (prefers-reduced-motion: reduce) {
   *,

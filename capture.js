@@ -1,31 +1,9 @@
-/* ==========================================================================
- * YKS-Screen — aba companheira de compartilhamento
- * --------------------------------------------------------------------------
- * Por que esta aba existe?
- *
- * A Activity do Discord roda dentro de um iframe de outra origem. O Discord
- * não coloca "allow=display-capture" nesse iframe, e o Chromium bloqueia a
- * Screen Capture API ali:
- *
- *   NotAllowedError: Access to the feature "display-capture" is disallowed
- *   by permissions policy.
- *
- * Nenhuma permissão do navegador resolve isso — é uma restrição de
- * plataforma. A saída é capturar FORA do iframe, numa aba normal do
- * navegador, e publicar os frames pelo mesmo transporte da sala. Quem
- * assiste continua dentro do Discord; só quem mostra sai.
- *
- * Esta página NÃO faz handshake com o Discord (não há Activity aqui): ela
- * recebe sala e identidade pela URL, conecta no transporte e publica.
- * ========================================================================== */
-
 (function () {
   'use strict';
 
   var F = window.YKS_FRAMES;
   var params = new URLSearchParams(window.location.search);
 
-  /* --- identidade e destino (vindos da Activity) ------------------------ */
   var room = (params.get('room') || '').trim();
   var user = {
     id: (params.get('user') || '').trim() || ('web-' + F.randomId(8)),
@@ -35,10 +13,7 @@
   var transportKind = (params.get('transport') || 'mqtt');
   var brokerList = (params.get('brokers') || '').split(',').filter(Boolean);
   if (!brokerList.length && params.get('broker')) brokerList = [params.get('broker')];
-  /* Fallback para os brokers públicos: o endereço enviado pela Activity pode
-     ser o do proxy do Discord, que nem sempre aceita conexões de fora. O
-     proxy encaminha para o mesmo broker público, então a sala continua a
-     mesma. */
+
   ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'].forEach(function (url) {
     if (brokerList.indexOf(url) === -1) brokerList.push(url);
   });
@@ -46,10 +21,8 @@
   var mqttPrefix = (params.get('mqtt') || 'yks').trim() || 'yks';
   var socketPath = (params.get('socketPath') || '/ws').trim() || '/ws';
 
-  /* Identidade desta aba: distingue o eco das nossas próprias mensagens. */
   var sid = F.randomId(12);
 
-  /* --- estado ------------------------------------------------------------ */
   var transport = null;
   var publishing = false;
   var connected = false;
@@ -70,8 +43,6 @@
     error: document.getElementById('capError')
   };
 
-  /* --- UI ---------------------------------------------------------------- */
-
   function setStatus(state, text) {
     if (!el.status) return;
     el.status.dataset.state = state;
@@ -88,16 +59,13 @@
     if (!transport) return;
     meta.sid = sid;
     meta.user = user;
-    /* Antes de conectar, as mensagens ficam na fila: sem isso o "stream"
-       inicial se perderia e a Activity nunca criaria o tile. */
+
     if (!connected) {
       pendingMetas.push(meta);
       return;
     }
     transport.sendMeta(meta);
   }
-
-  /* --- transporte --------------------------------------------------------- */
 
   function connect() {
     if (!room) {
@@ -107,7 +75,7 @@
     }
 
     if (el.room) el.room.textContent = 'Sala ' + room;
-    /* Não dá para começar a publicar antes de ter transporte. */
+
     if (el.start) el.start.disabled = true;
 
     transport = window.YKS_TRANSPORT.create({
@@ -124,7 +92,7 @@
         '/socketio/4.8.4/socket.io.min.js',
         'https://cdn.socket.io/4.8.4/socket.io.min.js'
       ],
-      /* Não assina o fluxo de vídeo: esta aba só publica. */
+
       subscribeMedia: false,
       stats: { metaOut: 0, bytesOut: 0 },
       onStatus: function (status, detail) {
@@ -134,14 +102,13 @@
           setStatus('ok', 'Conectado');
           showError('');
           if (el.start) el.start.disabled = false;
-          /* Despeja o que foi acumulado antes da conexão. */
+
           pendingMetas.splice(0).forEach(function (meta) { transport.sendMeta(meta); });
         } else if (status === 'reconnecting') {
           connected = false;
           attempts++;
           setStatus('warn', 'Reconectando…');
-          /* Depois de duas tentativas, explica o que está acontecendo: sem
-             isso a aba fica em "Reconectando…" sem dizer por quê. */
+
           if (attempts >= 2) {
             showError('Sem conexão com o transporte de mídia' +
               (detail ? ' (' + detail + ')' : '') + '. ' +
@@ -155,28 +122,23 @@
         }
       },
       onMeta: handleMeta,
-      onMedia: function () { /* não recebe mídia */ }
+      onMedia: function () {  }
     });
 
-    /* Heartbeat: mantém viva a presença da publicação para a Activity. */
     heartbeat = window.setInterval(function () {
       if (!publishing) return;
       sendMeta({ t: 'ping' });
     }, 5000);
   }
 
-  /* Mensagens de controle vindas da sala. */
   function handleMeta(meta) {
     if (!meta || meta.sid === sid) return;
 
-    /* Alguém que chegou agora precisa de um quadro completo. */
     if (meta.t === 'needkey' && meta.type) {
       window.YKS_BROADCAST.requestKeyFrame(meta.type);
       return;
     }
 
-    /* Alguém acabou de entrar na sala: reanuncia a transmissão, senão essa
-       pessoa ficaria sem tile até o compartilhamento parar e voltar. */
     if (meta.t === 'hello' && publishing && pub) {
       sendMeta({
         t: 'stream',
@@ -187,8 +149,6 @@
       });
     }
   }
-
-  /* --- captura ------------------------------------------------------------ */
 
   function startSharing() {
     if (publishing) return;
@@ -205,9 +165,6 @@
 
     setStatus('warn', 'Escolhendo a tela…');
 
-    /* Se o seletor não for concluído (janela fechada, picker que não abre),
-       a promessa pode ficar pendurada: depois de um tempo, volta ao estado
-       normal em vez de deixar a interface travada em "Escolhendo…". */
     var pending = window.setTimeout(function () {
       if (publishing) return;
       setStatus('ok', 'Conectado');
@@ -227,7 +184,7 @@
 
       if (el.video) {
         el.video.srcObject = stream;
-        el.video.play().catch(function () { /* ignora */ });
+        el.video.play().catch(function () {  });
       }
       if (el.preview) el.preview.classList.add('is-live');
       if (el.idle) el.idle.hidden = true;
@@ -271,8 +228,6 @@
     });
   }
 
-  /* O publicador parou (nosso botão ou a UI "parar compartilhamento" do
-     navegador): avisa a sala e volta a interface ao estado inicial. */
   function onPublishStopped() {
     publishing = false;
     pub = null;
@@ -291,7 +246,7 @@
 
   function stopSharing() {
     if (!publishing) return;
-    /* YKS_BROADCAST.stop() dispara onStopped(), que faz a limpeza. */
+
     window.YKS_BROADCAST.stop('screen');
   }
 
@@ -301,15 +256,6 @@
     });
   }
 
-  /* --- início ------------------------------------------------------------- */
-
-  /* A aba companheira NÃO pode ser aberta pelo proxy do Discord.
-
-     O proxy entrega uma CSP rígida (connect-src só libera o próprio host do
-     Discord), então o WebSocket do broker/relay é bloqueado e a aba fica em
-     "Conectando…" para sempre. A captura em si funciona, mas a mídia não
-     sai. Por isso a Activity abre esta aba no site real (CONFIG.activityUrl)
-     e, se ela acabar abrindo no proxy, o aviso aparece com o link certo. */
   function warnIfBehindProxy() {
     if (!/\.discordsays\.com$/.test(window.location.hostname)) return;
 
@@ -332,7 +278,7 @@
         link.target = '_blank';
         link.rel = 'noopener';
         if (el.error) el.error.appendChild(link);
-      } catch (e) { /* ignora */ }
+      } catch (e) {  }
     }
   }
 
