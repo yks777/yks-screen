@@ -24,10 +24,15 @@
 
     transport: (params.get('transport') || '').trim(),
 
-    brokerUrls: (params.get('broker') ? [params.get('broker')] : []).concat([
-      'wss://broker.emqx.io:8084/mqtt',
-      'wss://broker.hivemq.com:8884/mqtt'
-    ]),
+    brokerUrls: (function () {
+      if (IN_DISCORD_PROXY) {
+        return ['wss://' + window.location.host + BROKER_PREFIX + '/mqtt'];
+      }
+      return (params.get('broker') ? [params.get('broker')] : []).concat([
+        'wss://broker.emqx.io:8084/mqtt',
+        'wss://broker.hivemq.com:8884/mqtt'
+      ]);
+    })(),
 
     mqttPrefix: 'yks',
 
@@ -104,8 +109,6 @@
     roomCode: $('roomCode'),
     copyRoomBtn: $('copyRoomBtn'),
     btnScreen: $('btnScreen'),
-    btnCam: $('btnCam'),
-    btnMic: $('btnMic'),
     btnLeave: $('btnLeave'),
     toasts: $('toasts')
   };
@@ -683,7 +686,7 @@
       video: CONFIG.video,
       audio: CONFIG.audio,
       stats: stats,
-      isMuted: function () { return state.muted; },
+      isMuted: function () { return false; },
       onState: function (kind, msg) {
         if (kind === 'error') showToast(msg, 'error', 7000);
       },
@@ -789,6 +792,16 @@
     article.appendChild(live);
     article.appendChild(meta);
 
+    var fsBtn = document.createElement('button');
+    fsBtn.className = 'tile__fullscreen';
+    fsBtn.type = 'button';
+    fsBtn.setAttribute('aria-label', 'Tela cheia');
+    fsBtn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      toggleFullscreen(article);
+    });
+    article.appendChild(fsBtn);
+
     var controller = {
       key: userId + ':' + type,
       userId: userId,
@@ -885,6 +898,9 @@
   function destroyTile(key) {
     var tile = state.tiles[key];
     if (!tile) return;
+    if (document.fullscreenElement === tile.el) {
+      document.exitFullscreen().catch(function () {  });
+    }
     if (tile.decoder) { try { tile.decoder.close(); } catch (e) {  } }
     if (tile.audioCtx) { try { tile.audioCtx.close(); } catch (e) {  } }
     if (tile.el && tile.el.parentNode) tile.el.parentNode.removeChild(tile.el);
@@ -985,19 +1001,10 @@
 
   function updateControls() {
     var screen = publishersByType.screen;
-    var cam = publishersByType.camera;
 
     els.btnScreen.classList.toggle('is-active', !!screen);
     els.btnScreen.setAttribute('aria-pressed', String(!!screen));
     els.btnScreen.querySelector('.ctl__label').textContent = screen ? 'Parar tela' : 'Compartilhar tela';
-
-    els.btnCam.classList.toggle('is-active', !!cam);
-    els.btnCam.setAttribute('aria-pressed', String(!!cam));
-    els.btnCam.querySelector('.ctl__label').textContent = cam ? 'Parar câmera' : 'Ligar câmera';
-
-    els.btnMic.classList.toggle('is-active', !state.muted);
-    els.btnMic.setAttribute('aria-pressed', String(!state.muted));
-    els.btnMic.querySelector('.ctl__label').textContent = state.muted ? 'Ativar microfone' : 'Silenciar';
   }
 
   function toggleScreen() {
@@ -1029,37 +1036,6 @@
     }).catch(function (err) {
       reportCaptureError(err);
     });
-  }
-
-  function toggleCamera() {
-    if (publishersByType.camera) {
-      stopPublishing('camera', 'Câmera desligada.');
-      return;
-    }
-    if (!window.isSecureContext) {
-      showToast('A câmera exige HTTPS (o Discord já serve a Activity em HTTPS).', 'error', 8000);
-      return;
-    }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showToast('Este navegador não suporta captura de mídia.', 'error');
-      return;
-    }
-    navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15 } },
-      audio: false
-    }).then(function (stream) {
-      publishStream(stream, 'camera');
-      updateControls();
-      updateGrid();
-    }).catch(function (err) {
-      reportCaptureError(err);
-    });
-  }
-
-  function toggleMic() {
-    state.muted = !state.muted;
-    showToast(state.muted ? 'Microfone silenciado.' : 'Microfone ativado.', 'info');
-    updateControls();
   }
 
   function leaveRoom() {
@@ -1228,10 +1204,17 @@
       'porta, use um relay próprio (?transport=socketio).';
   }
 
+  function toggleFullscreen(tileEl) {
+    if (!document.fullscreenEnabled) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      tileEl.requestFullscreen().catch(function () {  });
+    }
+  }
+
   function bindControls() {
     els.btnScreen.addEventListener('click', toggleScreen);
-    els.btnCam.addEventListener('click', toggleCamera);
-    els.btnMic.addEventListener('click', toggleMic);
     els.btnLeave.addEventListener('click', leaveRoom);
     if (els.copyRoomBtn) els.copyRoomBtn.addEventListener('click', copyRoomCode);
 
@@ -1259,6 +1242,14 @@
     window.addEventListener('beforeunload', function () {
       Object.keys(publishersByType).forEach(function (type) { stopPublishing(type); });
       sendMeta({ t: 'bye', user: state.user });
+    });
+
+    document.addEventListener('fullscreenchange', function () {
+      var full = !!document.fullscreenElement;
+      document.querySelectorAll('.tile__fullscreen').forEach(function (btn) {
+        btn.setAttribute('aria-checked', String(full));
+        btn.textContent = full ? '✕' : '⛶';
+      });
     });
   }
 

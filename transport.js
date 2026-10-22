@@ -49,9 +49,16 @@
       urls = [opts.proxyBase.replace(/\/+$/, '') + opts.proxyPath + '/mqtt'];
     }
 
+    var totalFailures = 0;
+    var maxFailures = 5;
+
     function connectNext() {
       var url = urls.shift();
       if (!url) {
+        if (totalFailures >= maxFailures) {
+          opts.onStatus('error', 'Nenhum broker MQTT disponível');
+          return;
+        }
         opts.onStatus('error', 'Nenhum broker MQTT disponível');
         return;
       }
@@ -70,7 +77,14 @@
             opts.onStatus('connected', url);
           } else if (status === 'reconnecting') {
             failures++;
+            totalFailures++;
             opts.onStatus('reconnecting', detail);
+
+            if (totalFailures >= maxFailures) {
+              try { client.disconnect(); } catch (e) {  }
+              opts.onStatus('error', 'Falha ao conectar ao transporte de mídia após várias tentativas.');
+              return;
+            }
 
             if (failures >= 2 && urls.length) {
               try { client.disconnect(); } catch (e) {  }
