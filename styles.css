@@ -926,6 +926,64 @@ body.has-left .controls { opacity: .45; pointer-events: none; }
 }
 
 /* ==========================================================================
+   7b. LINK DA ABA COMPANHEIRA
+   --------------------------------------------------------------------------
+   Aparece só quando o navegador impede a abertura automática de uma nova
+   aba (o link precisa ser aberto à mão).
+   ========================================================================== */
+
+.companion {
+  position: fixed;
+  right: 20px;
+  bottom: 88px;   /* acima da barra de controles */
+  z-index: 9500;
+  width: min(420px, calc(100vw - 40px));
+  padding: 14px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.companion__text {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.companion__row {
+  display: flex;
+  gap: 8px;
+}
+
+.companion__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.companion__copy {
+  flex: 0 0 auto;
+  padding: 9px 16px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--c-line);
+  background: var(--c-dim);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.companion__copy:hover { background: rgba(255, 43, 27, .2); }
+
+/* ==========================================================================
    8. RESPONSIVIDADE (iframe do Discord: desktop e mobile)
    ========================================================================== */
 

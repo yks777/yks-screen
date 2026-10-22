@@ -49,6 +49,12 @@
        > General Information > Application ID. */
     clientId: params.get('clientId') || 'SEU_CLIENT_ID',
 
+    /* URL REAL do site publicado (ex.: https://seu-user.github.io/yks-screen/).
+       É usada para abrir a aba companheira de compartilhamento de tela: ela
+       precisa rodar FORA do iframe do Discord, onde a captura de tela é
+       permitida. Vazio = usa a origem atual (a do proxy do Discord). */
+    activityUrl: params.get('activityUrl') || 'SEU_URL_PUBLICADA',
+
     /* ------------------------------------------------------------------
      * URL Mappings (Portal do Desenvolvedor > Activities > URL Mappings)
      *   PREFIX     | TARGET
@@ -108,17 +114,9 @@
     mockUserId: params.get('user') || '111222333444555666',
     mockUserName: params.get('name') || 'Visitante',
 
-    /* --- mídia --- */
-    video: {
-      width: 1280,
-      height: 720,
-      framerate: 15,
-      bitrate: 1200000,
-      codec: 'vp8'
-    },
-    audio: {
-      sampleRate: 16000,   /* PCM mono 16 kHz ≈ 32 KB/s por participante */
-    },
+    /* --- mídia (config.js — compartilhado com a aba companheira) --- */
+    video: window.YKS_MEDIA.video,
+    audio: window.YKS_MEDIA.audio,
 
     /* Presença: heartbeat e expiração dos participantes.
        O timeout é a rede de segurança: se o "bye" se perder (ex.: o
@@ -142,7 +140,20 @@
     tiles: {},           /* "userId:type" -> tile */
     publishers: {},      /* "userId:type" -> publicação local */
     muted: true,         /* começa mutado por privacidade */
-    left: false
+    left: false,
+
+    /* Identidade DESTA aba. O eco das próprias mensagens é descartado pelo
+       `sid`, e não pelo userId: a aba companheira publica com o MESMO
+       userId do usuário e precisa chegar até a Activity. */
+    sid: (window.YKS_FRAMES ? window.YKS_FRAMES.randomId(12) : String(Date.now())),
+
+    /* Publicações feitas pelo MESMO usuário em outra aba (aba companheira):
+       { 'screen': { lastSeen } } — aparece no roster como "você" e vira um
+       tile remoto. */
+    selfCompanion: {},
+
+    /* Tipos publicados pelo próprio usuário em outra aba (para o roster). */
+    selfStreams: {}
   };
 
   var publishersByType = {};
@@ -212,13 +223,9 @@
     return (name || '?').trim().charAt(0).toUpperCase() || '?';
   }
 
+  /* Id aleatório curto (compartilhado com frames.js). */
   function randomId(len) {
-    var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    var out = '';
-    for (var i = 0; i < (len || 8); i++) {
-      out += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return out;
+    return window.YKS_FRAMES.randomId(len);
   }
 
   /* ======================================================================
@@ -249,34 +256,6 @@
    * 5. CARREGAMENTO DAS BIBLIOTECAS (CDN, com fallback)
    * ====================================================================== */
 
-  /* Carrega um script clássico, tentando as fontes em ordem.
-     Após o carregamento, valida que o global esperado existe — assim uma
-     fonte que responde 200 com HTML (ex.: fallback de SPA) não "passa". */
-  function loadScript(sources, globalName) {
-    return sources.reduce(function (chain, src) {
-      return chain.catch(function () {
-        return new Promise(function (resolve, reject) {
-          var el = document.createElement('script');
-          el.src = src;
-          el.async = true;
-          el.onload = function () {
-            if (globalName && typeof window[globalName] === 'undefined') {
-              el.remove();
-              reject(new Error('"' + globalName + '" não foi definido por ' + src));
-              return;
-            }
-            resolve(src);
-          };
-          el.onerror = function () {
-            el.remove();
-            reject(new Error('Falha ao carregar ' + src));
-          };
-          document.head.appendChild(el);
-        });
-      });
-    }, Promise.reject(new Error('nenhuma fonte')));
-  }
-
   /* Carrega o SDK (ESM) via import() dinâmico, tentando as fontes em ordem. */
   function loadSdk(sources) {
     return sources.reduce(function (chain, src) {
@@ -296,7 +275,21 @@
   var IN_DISCORD_PROXY = /\.discordsays\.com$/.test(window.location.hostname) ||
     params.get('proxy') === '1';
 
+  /* Estamos dentro de um frame? A Activity do Discord sempre roda dentro de
+     um iframe (no proxy ou no cliente web). Fora dele, o app funciona como
+     site comum (sala pela URL). */
+  function insideDiscordFrame() {
+    return /\.discordsays\.com$/.test(window.location.hostname) || window.parent !== window;
+  }
+
   function initDiscord() {
+    /* Fora do Discord (site aberto direto no navegador) e com ?room= na URL,
+       a Activity funciona como site comum: não há handshake a fazer e nada a
+       sincronizar com o cliente do Discord. */
+    if (!CONFIG.mock && !insideDiscordFrame() && (params.get('room') || '').trim()) {
+      return Promise.resolve(null);
+    }
+
     return loadSdk(CONFIG.sdkSources).then(function (sdk) {
       /* ----------------------------------------------------------------
        * patchUrlMappings(): DEVE ser chamado ANTES de qualquer requisição
@@ -329,7 +322,29 @@
       }
 
       return sdkInstance.ready().then(function () { return sdkInstance; });
+    }).catch(function (err) {
+      throw new Error(describeInitError(err));
     });
+  }
+
+  /* Transforma o erro bruto de inicialização em uma mensagem acionável. */
+  function describeInitError(err) {
+    var msg = (err && err.message) || String(err);
+
+    if (CONFIG.clientId === 'SEU_CLIENT_ID') {
+      return 'Application ID do Discord não configurado: troque CONFIG.clientId no app.js pelo ' +
+        'Application ID do Portal do Desenvolvedor (ou passe ?clientId=...).';
+    }
+    if (/dynamically imported module|Failed to fetch|import\(/i.test(msg)) {
+      return 'Não foi possível carregar o SDK do Discord (' + msg + '). Verifique o URL Mapping ' +
+        '/sdk no Portal do Desenvolvedor e a sua conexão.';
+    }
+    if (!insideDiscordFrame() && !CONFIG.mock) {
+      return 'O SDK do Discord não respondeu (' + msg + '). Fora do Discord, use ?room=CODIGO ' +
+        'para entrar numa sala.';
+    }
+    return 'O Discord recusou o handshake da Activity (' + msg + '). Verifique o Application ID ' +
+      'e abra a Activity a partir de um canal de voz.';
   }
 
   /* Aplica as URL Mappings (helper isolado para tratamento de erro). */
@@ -345,19 +360,19 @@
        É ele que define a sala: quem abrir a Activity no mesmo canal
        entra na mesma sala. */
     var channelId = sdk.channelId || (CONFIG.mock ? CONFIG.mockChannelId : null);
-    if (!channelId) {
-      throw new Error('Não foi possível identificar o canal de voz. Abra a Activity a partir de um canal de voz.');
+    /* Fora do Discord (uso como site comum) a sala vem da URL. */
+    var manualRoom = (params.get('room') || '').trim();
+
+    if (!channelId && !manualRoom) {
+      throw new Error('Não foi possível identificar o canal de voz. Abra a Activity a partir de um canal de voz (a sala é o canal).');
     }
 
-    state.roomId = String(channelId);
+    state.roomId = String(channelId || manualRoom);
     state.guildId = sdk.guildId;
     setRoomChip('Sala ' + state.roomId);
 
-    /* Fora do Discord (uso como site comum) a sala vem da URL. */
-    if (!CONFIG.mock && !sdk.channelId) {
-      var code = (params.get('room') || '').trim();
-      if (code) state.roomId = code;
-    }
+    /* Sem canal não há o que consultar no Discord. */
+    if (!channelId) return Promise.resolve(state.roomId);
 
     /* Os dados do canal são buscados apenas para enriquecimento (nome/tipo).
        Nomes vêm do cliente e não são confiáveis — nunca são usados como
@@ -445,161 +460,38 @@
    *   handlers.media(meta, bytes)     -> mídia recebida
    * ====================================================================== */
 
-  var textEncoder = new TextEncoder();
-  var textDecoder = new TextDecoder();
+  /* --- Transporte (implementação em transport.js) ----------------------- */
 
-  /* Empacota metadados + payload em um único frame binário. */
-  function encodeFrame(meta, payload) {
-    var metaBytes = textEncoder.encode(JSON.stringify(meta));
-    var out = new Uint8Array(4 + metaBytes.length + payload.length);
-    new DataView(out.buffer).setUint32(0, metaBytes.length);
-    out.set(metaBytes, 4);
-    out.set(payload, 4 + metaBytes.length);
-    return out;
-  }
-
-  /* Desempacota um frame binário. */
-  function decodeFrame(bytes) {
-    var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    var len = view.getUint32(0);
-    var meta = JSON.parse(textDecoder.decode(bytes.subarray(4, 4 + len)));
-    return { meta: meta, payload: bytes.subarray(4 + len) };
-  }
-
-  /* --- Transporte MQTT (padrão): broker público, sem servidor próprio --- */
-  function createMqttTransport(room, handlers) {
-    var topicBase = CONFIG.mqttPrefix + '/' + room;
-    var urls = CONFIG.brokerUrls.slice();
-    var client = null;
-
-    function connectNext() {
-      var url = urls.shift();
-      if (!url) {
-        handlers.status('error', 'Nenhum broker MQTT disponível');
-        return;
-      }
-      client = new window.MqttClient({
-        url: url,
-        clientId: 'yks-' + randomId(10),
-        keepalive: 30,
-        onStatus: function (status, detail) {
-          if (status === 'connected') {
-            client.subscribe(topicBase + '/media');
-            client.subscribe(topicBase + '/ctrl');
-            handlers.status('connected', url);
-          } else if (status === 'reconnecting') {
-            handlers.status('reconnecting', detail);
-          } else if (status === 'error') {
-            handlers.status('error', detail);
-            /* tenta o próximo broker */
-            if (url) connectNext();
-          }
-        },
-        onMessage: function (topic, bytes) {
-          if (topic === topicBase + '/ctrl') {
-            var meta;
-            try { meta = JSON.parse(textDecoder.decode(bytes)); } catch (e) { return; }
-            handlers.meta(meta);
-          } else if (topic === topicBase + '/media') {
-            var frame = decodeFrame(bytes);
-            handlers.media(frame.meta, frame.payload);
-          }
-        }
-      });
-      client.connect();
-    }
-
-    connectNext();
-
-    return {
-      kind: 'mqtt',
-    sendMeta: function (meta) {
-      if (!client) return;
-      stats.metaOut++;
-      client.publish(topicBase + '/ctrl', textEncoder.encode(JSON.stringify(meta)));
-    },
-    /* Versão confiável (QoS 1): espera o PUBACK do broker. Usada na
-       mensagem de saída, que não pode se perder. */
-    sendMetaAck: function (meta) {
-      if (!client) return Promise.resolve(false);
-      stats.metaOut++;
-      return client.publishAck(topicBase + '/ctrl', textEncoder.encode(JSON.stringify(meta)), 5000)
-        .catch(function () { return false; });
-    },
-      sendMedia: function (meta, payload) {
-        if (!client) return;
-        stats.bytesOut += payload.length;
-        client.publish(topicBase + '/media', encodeFrame(meta, payload));
-      },
-      close: function () { if (client) client.disconnect(); }
-    };
-  }
-
-  /* --- Transporte Socket.IO (opcional): relay próprio ------------------- */
+  /* URL do relay: a origem pura (o namespace do Socket.IO vem do path).
+     Dentro do Discord usa o host mapeado; fora, o relay local de dev. */
   function relayUrl() {
     var useExternal = /\.discordsays\.com$/.test(window.location.hostname) ||
       params.get('external') === '1';
-    var raw = useExternal ? 'wss://' + CONFIG.relayTarget : CONFIG.devRelayUrl;
-
-    /* O Socket.IO deriva o NAMESPACE do path da URL: a URL deve ser a
-       origem pura; o caminho do transporte vai na opção `path`. */
-    try {
-      var u = new URL(raw);
-      u.pathname = '/';
-      u.search = '';
-      u.hash = '';
-      return u.toString().replace(/\/$/, '');
-    } catch (e) {
-      return raw.replace(/\/+$/, '');
-    }
-  }
-
-  function createSocketIoTransport(room, user, handlers) {
-    var socket = null;
-
-    loadScript(CONFIG.socketIoSources, 'io').then(function () {
-      if (typeof window.io !== 'function') throw new Error('Socket.IO indisponível.');
-
-      socket = window.io(relayUrl(), {
-        path: CONFIG.socketIoPath,
-        transports: ['websocket'],
-        reconnection: true,
-        reconnectionDelay: 1500,
-        auth: { roomId: room, guildId: state.guildId, user: user }
-      });
-
-      socket.on('connect', function () { handlers.status('connected'); });
-      socket.on('disconnect', function (r) { handlers.status('reconnecting', r); });
-      socket.on('connect_error', function (e) { handlers.status('error', e && e.message); });
-      socket.on('meta', function (meta) { handlers.meta(meta); });
-      socket.on('media', function (meta, buffer) {
-        handlers.media(meta, new Uint8Array(buffer));
-      });
-    }).catch(function (e) {
-      handlers.status('error', e && e.message);
+    return window.YKS_TRANSPORT.computeRelayUrl({
+      external: useExternal,
+      target: CONFIG.relayTarget,
+      devUrl: CONFIG.devRelayUrl
     });
-
-    return {
-      kind: 'socketio',
-      sendMeta: function (meta) {
-        if (!socket) return;
-        stats.metaOut++;
-        socket.emit('meta', meta);
-      },
-      sendMedia: function (meta, payload) {
-        if (!socket) return;
-        stats.bytesOut += payload.length;
-        socket.emit('media', meta, payload.buffer);
-      },
-      close: function () { if (socket) socket.disconnect(); }
-    };
   }
 
+  /* Cria o transporte da sala. */
   function createTransport(room, handlers) {
-    if (CONFIG.transport === 'socketio') {
-      return createSocketIoTransport(room, state.user, handlers);
-    }
-    return createMqttTransport(room, handlers);
+    return window.YKS_TRANSPORT.create({
+      kind: CONFIG.transport,
+      room: room,
+      user: state.user,
+      guildId: state.guildId,
+      mqttPrefix: CONFIG.mqttPrefix,
+      brokerUrls: CONFIG.brokerUrls,
+      relayUrl: relayUrl(),
+      socketPath: CONFIG.socketIoPath,
+      socketIoSources: CONFIG.socketIoSources,
+      subscribeMedia: true,
+      stats: stats,
+      onStatus: handlers.status,
+      onMeta: handlers.meta,
+      onMedia: handlers.media
+    });
   }
 
   /* ======================================================================
@@ -614,11 +506,24 @@
 
   function onTransportMeta(meta) {
     if (!meta || !meta.user || !meta.user.id) return;
-    /* Ignora as próprias mensagens (o broker retransmite o que publicamos). */
-    if (meta.user.id === state.user.id) return;
+    /* Ignora as próprias mensagens (o broker retransmite o que publicamos).
+       O filtro é pelo `sid` (esta aba), e não pelo userId: a aba companheira
+       publica com o MESMO userId do usuário e precisa chegar aqui. */
+    if (meta.sid) {
+      if (meta.sid === state.sid) return;
+    } else if (meta.user.id === state.user.id) {
+      /* Cliente antigo (sem sid): o filtro por usuário evita o eco. */
+      return;
+    }
     stats.metaIn++;
     stats.lastMeta.push(meta.t + ':' + meta.user.username);
     if (stats.lastMeta.length > 12) stats.lastMeta.shift();
+
+    /* Publicação do MESMO usuário em outra aba (aba companheira). */
+    if (meta.user.id === state.user.id) {
+      onSelfCompanionMeta(meta);
+      return;
+    }
 
     var peer = state.peers[meta.user.id];
     if (!peer) {
@@ -642,6 +547,23 @@
       if (!peer.greeted) {
         peer.greeted = true;
         sendMeta({ t: 'hello', user: state.user });
+
+        /* Reanuncia o que já está no ar: quem acabou de chegar não pode
+           ficar sem tile até o transmissor parar e voltar a transmitir. */
+        Object.keys(publishersByType).forEach(function (type) {
+          announceStream(publishersByType[type]);
+        });
+        /* Mesmo para quem publica em outra aba (a companheira). */
+        Object.keys(state.selfStreams).forEach(function (type) {
+          sendMeta({
+            t: 'stream',
+            user: state.user,
+            type: type,
+            w: state.selfStreams[type].width || 0,
+            h: state.selfStreams[type].height || 0,
+            hasAudio: !!state.selfStreams[type].hasAudio
+          });
+        });
       }
       updateRoster();
       return;
@@ -662,6 +584,7 @@
         hasAudio: !!meta.hasAudio
       };
       ensureRemoteTile(peer.id, meta.type, peer);
+      requestKeyFrameIfNeeded(peer.id, meta.type);
       updateRoster();
       return;
     }
@@ -671,11 +594,76 @@
       destroyTile(peer.id + ':' + meta.type);
       updateRoster();
       updateGrid();
+      return;
     }
+
+    if (meta.t === 'needkey') {
+      /* Um participante que acabou de chegar precisa de um quadro completo
+         para decodificar — pedimos um keyframe imediato. */
+      if (publishersByType[meta.type]) {
+        window.YKS_BROADCAST.requestKeyFrame(meta.type);
+      }
+      return;
+    }
+  }
+
+  /* Mensagens do MESMO usuário vindas de outra aba (a aba companheira).
+     Não viram participantes no roster — o usuário já aparece como "você" —
+     mas viram tiles e marcam a presença na lista de streams. */
+  function onSelfCompanionMeta(meta) {
+    var type = meta.type;
+
+    if (meta.t === 'ping') {
+      state.selfCompanion.lastSeen = Date.now();
+      return;
+    }
+
+    if (meta.t === 'stream') {
+      state.selfCompanion.lastSeen = Date.now();
+      state.selfStreams[type] = {
+        type: type,
+        width: meta.w || 0,
+        height: meta.h || 0,
+        hasAudio: !!meta.hasAudio
+      };
+      ensureRemoteTile(state.user.id, type, {
+        id: state.user.id,
+        username: state.user.username,
+        avatar: state.user.avatar
+      });
+      requestKeyFrameIfNeeded(state.user.id, type);
+      updateRoster();
+      updateGrid();
+      return;
+    }
+
+    if (meta.t === 'stop') {
+      state.selfCompanion.lastSeen = Date.now();
+      delete state.selfStreams[type];
+      /* Só remove o tile se ele NÃO for local: a mesma pessoa não publica
+         a tela nos dois lugares ao mesmo tempo. */
+      var key = state.user.id + ':' + type;
+      var tile = state.tiles[key];
+      if (tile && !tile.isLocal) destroyTile(key);
+      updateRoster();
+      updateGrid();
+    }
+  }
+
+  /* Se o tile não recebeu nenhum quadro em 1,5 s, pede um keyframe: sem
+     isso quem chega no meio da transmissão ficaria com a tela preta até o
+     próximo keyframe (que só vem a cada 4 s). */
+  function requestKeyFrameIfNeeded(userId, type) {
+    window.setTimeout(function () {
+      var tile = state.tiles[userId + ':' + type];
+      if (!tile || tile.hasFrame) return;
+      sendMeta({ t: 'needkey', user: state.user, type: type });
+    }, 1500);
   }
 
   function sendMeta(meta) {
     if (!state.transport) return Promise.resolve(false);
+    meta.sid = state.sid;
     return state.transport.sendMeta(meta);
   }
 
@@ -710,6 +698,24 @@
     }, CONFIG.heartbeatMs);
   }
 
+  /* A aba companheira manda "ping" enquanto está viva. Se parar de mandar
+     (o usuário fechou a aba do navegador), o tile dela some sozinho. */
+  function startCompanionWatchdog() {
+    state.companionWatchdog = setInterval(function () {
+      var seen = state.selfCompanion.lastSeen;
+      if (!seen) return;
+      if (Date.now() - seen <= CONFIG.peerTimeoutMs) return;
+
+      Object.keys(state.selfStreams).forEach(function (type) {
+        delete state.selfStreams[type];
+        destroyTile(state.user.id + ':' + type);
+      });
+      state.selfCompanion.lastSeen = 0;
+      updateRoster();
+      updateGrid();
+    }, 5000);
+  }
+
   /* ======================================================================
    * 9. PUBLICAÇÃO DE MÍDIA (captura -> WebCodecs -> WebSocket)
    * ====================================================================== */
@@ -725,245 +731,49 @@
     });
   }
 
+  /* Publica uma MediaStream capturada (implementação em broadcast.js). */
   function publishStream(stream, type) {
-    var pub = {
-      type: type,
+    var pub = window.YKS_BROADCAST.publish({
       stream: stream,
-      active: true,
-      video: null,
-      audio: null,
-      width: 0,
-      height: 0,
-      seq: 0
-    };
+      type: type,
+      user: state.user,
+      sid: state.sid,
+      transport: state.transport,
+      video: CONFIG.video,
+      audio: CONFIG.audio,
+      stats: stats,
+      isMuted: function () { return state.muted; },
+      onState: function (kind, msg) {
+        if (kind === 'error') showToast(msg, 'error', 7000);
+      },
+      onStopped: function (stoppedType) {
+        /* Encerra a publicação local: avisa a sala e limpa a UI. */
+        sendMeta({ t: 'stop', user: state.user, type: stoppedType });
+        delete publishersByType[stoppedType];
+        delete state.publishers[state.user.id + ':' + stoppedType];
+        destroyTile(state.user.id + ':' + stoppedType);
+        updateGrid();
+        updateControls();
+        showToast(pendingStopMessage || 'O compartilhamento foi encerrado.', 'info');
+        pendingStopMessage = null;
+      }
+    });
+
     publishersByType[type] = pub;
     state.publishers[state.user.id + ':' + type] = pub;
-
-    var videoTrack = stream.getVideoTracks()[0];
-    var audioTrack = stream.getAudioTracks()[0];
-
-    if (videoTrack) {
-      startVideoPublisher(pub, videoTrack).catch(function (e) {
-        console.error('[YKS] falha no encoder de vídeo:', e);
-        showToast('Não foi possível codificar o vídeo: ' + e.message, 'error', 7000);
-      });
-    }
-    if (audioTrack) {
-      startAudioPublisher(pub, audioTrack);
-    }
-
-    /* Quando o usuário para o compartilhamento pela UI do navegador. */
-    pub.onEnded = function () {
-      if (pub.active) stopPublishing(type, 'O compartilhamento foi encerrado.');
-    };
-    stream.getTracks().forEach(function (track) {
-      track.addEventListener('ended', pub.onEnded);
-    });
 
     announceStream(pub);
     showToast(type === 'screen' ? 'Compartilhando sua tela.' : 'Câmera ligada.', 'success');
     return pub;
   }
 
-  /* Codifica os frames do vídeo com WebCodecs (VP8) e envia via WebSocket. */
-  function startVideoPublisher(pub, track) {
-    if (typeof window.VideoEncoder === 'undefined') {
-      throw new Error('WebCodecs (VideoEncoder) não está disponível neste navegador.');
-    }
-
-    var video = document.createElement('video');
-    video.srcObject = new MediaStream([track]);
-    video.muted = true;
-    video.playsInline = true;
-    video.style.display = 'none';
-    document.body.appendChild(video);
-    pub.videoEl = video;
-
-    return video.play().then(function () {
-      var encoder = new window.VideoEncoder({
-        output: function (chunk) { sendVideoChunk(pub, chunk); },
-        error: function (e) { console.error('[YKS] VideoEncoder:', e); }
-      });
-      pub.video = encoder;
-
-      var settings = {
-        codec: CONFIG.video.codec,
-        width: CONFIG.video.width,
-        height: CONFIG.video.height,
-        bitrate: CONFIG.video.bitrate,
-        framerate: CONFIG.video.framerate,
-        latencyMode: 'realtime'
-      };
-
-      return window.VideoEncoder.isConfigSupported(settings).then(function (res) {
-        if (!res.supported) throw new Error('Codeco ' + settings.codec + ' não suportado.');
-        encoder.configure(settings);
-
-        var keyFrameEvery = Math.max(1, Math.round(CONFIG.video.framerate * 4));
-        var count = 0;
-        var lastEncode = 0;
-
-        function encodeNow() {
-          if (!pub.active || !encoder || encoder.state !== 'configured') return;
-          /* Não enfileira demais: mantém a latência baixa. */
-          if (encoder.encodeQueueSize >= 3) return;
-
-          var w = video.videoWidth, h = video.videoHeight;
-          if (w && h && (w !== pub.width || h !== pub.height)) {
-            /* A resolução mudou (ex.: redimensionou a janela): reconfigura. */
-            pub.width = w; pub.height = h;
-            try {
-              encoder.configure({
-                codec: CONFIG.video.codec, width: w, height: h,
-                bitrate: CONFIG.video.bitrate,
-                framerate: CONFIG.video.framerate, latencyMode: 'realtime'
-              });
-            } catch (e) { /* mantém a config anterior */ }
-          }
-
-          try {
-            var frame = new window.VideoFrame(video, {
-              timestamp: Math.round(performance.now() * 1000)
-            });
-            encoder.encode(frame, { keyFrame: (count % keyFrameEvery) === 0 });
-            frame.close();
-            count++;
-            stats.framesEncoded++;
-            lastEncode = Date.now();
-          } catch (e) {
-            console.warn('[YKS] frame descartado:', e.message);
-          }
-        }
-
-        /* Caminho preferencial: um encode por frame novo da captura. */
-        function pumpByFrameCallback() {
-          if (!pub.active) return;
-          encodeNow();
-          video.requestVideoFrameCallback(pumpByFrameCallback);
-        }
-
-        if (video.requestVideoFrameCallback) {
-          video.requestVideoFrameCallback(pumpByFrameCallback);
-        }
-
-        /* Watchdog: se o requestVideoFrameCallback não disparar, continuamos
-           codificando por temporizador. */
-        pub.watchdog = window.setInterval(function () {
-          if (pub.active && Date.now() - lastEncode > 400) encodeNow();
-        }, 200);
-      });
-    });
-  }
-
-  function sendVideoChunk(pub, chunk) {
-    if (!state.transport) return;
-    var data = new Uint8Array(chunk.byteLength);
-    chunk.copyTo(data);
-    state.transport.sendMedia({
-      t: 'v',
-      userId: state.user.id,
-      type: pub.type,
-      seq: pub.seq++,
-      ts: chunk.timestamp,
-      key: chunk.type === 'key',
-      w: pub.width,
-      h: pub.height,
-      codec: CONFIG.video.codec
-    }, data);
-  }
-
-  /* Captura o áudio, converte para PCM 16 kHz mono e envia via WebSocket. */
-  function startAudioPublisher(pub, track) {
-    var Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-
-    var ctx = new Ctx();
-    var source = ctx.createMediaStreamSource(new MediaStream([track]));
-    var processor = ctx.createScriptProcessor(4096, 1, 1);
-    var sink = ctx.createGain();
-    sink.gain.value = 0;              /* evita eco no microfone local */
-
-    processor.onaudioprocess = function (event) {
-      if (!pub.active || state.muted) return;
-      var input = event.inputBuffer.getChannelData(0);
-      var pcm = downsampleToPcm16(input, ctx.sampleRate, CONFIG.audio.sampleRate);
-      if (!pcm.length || !state.transport) return;
-      var bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-      state.transport.sendMedia({
-        t: 'a',
-        userId: state.user.id,
-        type: pub.type,
-        seq: pub.seq++,
-        rate: CONFIG.audio.sampleRate
-      }, bytes);
-    };
-
-    source.connect(processor);
-    processor.connect(sink);
-    sink.connect(ctx.destination);
-
-    pub.audio = { ctx: ctx, processor: processor, source: source, sink: sink };
-  }
-
-  /* Converte Float32 -> PCM 16 bits, reamostrando para a taxa alvo. */
-  function downsampleToPcm16(input, inRate, outRate) {
-    if (inRate === outRate) {
-      var same = new Int16Array(input.length);
-      for (var i = 0; i < input.length; i++) {
-        var s = Math.max(-1, Math.min(1, input[i]));
-        same[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-      }
-      return same;
-    }
-    var ratio = inRate / outRate;
-    var outLen = Math.floor(input.length / ratio);
-    var out = new Int16Array(outLen);
-    for (var j = 0; j < outLen; j++) {
-      var pos = j * ratio;
-      var idx = Math.floor(pos);
-      var frac = pos - idx;
-      var a = input[idx];
-      var b = idx + 1 < input.length ? input[idx + 1] : a;
-      var v = a * (1 - frac) + b * frac;
-      v = Math.max(-1, Math.min(1, v));
-      out[j] = v < 0 ? v * 0x8000 : v * 0x7fff;
-    }
-    return out;
-  }
+  /* Mensagem do próximo stopPublishing (evita toast duplicado). */
+  var pendingStopMessage = null;
 
   function stopPublishing(type, message) {
-    var pub = publishersByType[type];
-    if (!pub) return;
-    pub.active = false;
-
-    if (pub.video) { try { pub.video.close(); } catch (e) { /* ignora */ } }
-    if (pub.watchdog) { clearInterval(pub.watchdog); pub.watchdog = null; }
-    if (pub.audio) {
-      try { pub.audio.processor.disconnect(); } catch (e) { /* ignora */ }
-      try { pub.audio.source.disconnect(); } catch (e) { /* ignora */ }
-      try { pub.audio.ctx.close(); } catch (e) { /* ignora */ }
-    }
-    if (pub.videoEl) {
-      pub.videoEl.srcObject = null;
-      pub.videoEl.remove();
-    }
-    if (pub.stream) {
-      pub.stream.getTracks().forEach(function (t) {
-        if (pub.onEnded) t.removeEventListener('ended', pub.onEnded);
-        try { t.stop(); } catch (e) { /* ignora */ }
-      });
-    }
-
-    sendMeta({ t: 'stop', user: state.user, type: type });
-    delete publishersByType[type];
-    delete state.publishers[state.user.id + ':' + type];
-
-    /* remove o tile local */
-    destroyTile(state.user.id + ':' + type);
-    updateGrid();
-    updateControls();
-
-    if (message) showToast(message, 'info');
+    if (!publishersByType[type]) return;
+    pendingStopMessage = message || 'O compartilhamento foi encerrado.';
+    window.YKS_BROADCAST.stop(type);
   }
 
   /* ======================================================================
@@ -972,8 +782,14 @@
 
   function handleRemoteMedia(meta, bytes) {
     if (!meta || !meta.userId) return;
-    /* Ignora o próprio eco (o broker retransmite o que publicamos). */
-    if (meta.userId === state.user.id) return;
+    /* Ignora o próprio eco (o broker retransmite o que publicamos).
+       O filtro é pelo `sid`: a aba companheira publica com o mesmo userId
+       e precisa ser exibida aqui. */
+    if (meta.sid) {
+      if (meta.sid === state.sid) return;
+    } else if (meta.userId === state.user.id) {
+      return;
+    }
 
     var tile = state.tiles[meta.userId + ':' + meta.type];
     if (!tile) return;
@@ -1058,6 +874,7 @@
       decoderCodec: null,
       audioCtx: null,
       audioNextTime: 0,
+      hasFrame: false,
       isLocal: isLocal
     };
 
@@ -1110,6 +927,7 @@
     tile.ctx.drawImage(frame, 0, 0, w, h);
     frame.close();
     stats.framesDecoded++;
+    tile.hasFrame = true;
     tile.el.classList.add('is-live');
   }
 
@@ -1202,14 +1020,16 @@
     /* A lista inclui o próprio usuário (primeiro) + os demais. */
     var list = [];
     if (state.user && state.user.id) {
+      /* Streams publicados pelo próprio usuário: os locais (nesta aba) e os
+         feitos em outra aba (a aba companheira de compartilhamento). */
+      var selfStreams = {};
+      Object.keys(publishersByType).forEach(function (type) { selfStreams[type] = { type: type }; });
+      Object.keys(state.selfStreams).forEach(function (type) { selfStreams[type] = state.selfStreams[type]; });
+
       list.push({
         id: state.user.id,
         username: state.user.username,
-        streams: (function () {
-          var s = {};
-          Object.keys(publishersByType).forEach(function (type) { s[type] = { type: type }; });
-          return s;
-        })(),
+        streams: selfStreams,
         isSelf: true
       });
     }
@@ -1285,6 +1105,17 @@
       showToast('Este navegador não suporta compartilhamento de tela.', 'error');
       return;
     }
+
+    /* O Discord carrega a Activity num iframe SEM "allow=display-capture".
+       Nesses casos o Chromium rejeita a captura com NotAllowedError antes de
+       qualquer prompt — e nenhuma permissão do navegador resolve. Detectamos
+       isso antes de tentar e abrimos a aba companheira, que roda fora do
+       iframe (onde a captura funciona). */
+    if (!window.YKS_ERRORS.canCaptureHere()) {
+      openCompanionTab();
+      return;
+    }
+
     navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: CONFIG.video.width }, height: { ideal: CONFIG.video.height }, frameRate: { ideal: CONFIG.video.framerate } },
       audio: true
@@ -1355,21 +1186,134 @@
   }
 
   function reportCaptureError(err) {
-    var name = err && err.name;
-    var msg;
-    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-      msg = 'Permissão negada. Libere o acesso à tela/câmera nas permissões do navegador e tente de novo.';
-    } else if (name === 'NotFoundError') {
-      msg = 'Nenhuma fonte de captura encontrada.';
-    } else if (name === 'NotSupportedError') {
-      msg = 'Este navegador não suporta esse tipo de captura.';
-    } else if (name === 'AbortError') {
-      msg = 'A captura foi cancelada.';
-    } else {
-      msg = 'Falha ao capturar a mídia: ' + ((err && err.message) || err);
+    var info = window.YKS_ERRORS.describeCaptureError(err);
+    console.error('[YKS] captura:', err && err.name, err && err.message,
+      '| podeCapturarAqui:', window.YKS_ERRORS.canCaptureHere());
+
+    if (info.blocked) {
+      /* Bloqueio por política de frame: a saída é a aba companheira. */
+      showToast(info.msg, 'error', 8000);
+      openCompanionTab();
+      return;
     }
-    console.error('[YKS] captura:', err);
-    showToast(msg, 'error', 8000);
+
+    showToast(info.msg + (info.hint ? ' ' + info.hint : ''), 'error', 8000);
+  }
+
+  /* ======================================================================
+   * 14. ABA COMPANHEIRA DE COMPARTILHAMENTO
+   * --------------------------------------------------------------------------
+   * Dentro do Discord não é possível capturar a tela: o iframe das Activities
+   * não recebe "allow=display-capture" e o Chromium bloqueia a Screen Capture
+   * API (NotAllowedError / "disallowed by permissions policy").
+   *
+   * A saída é capturar FORA do iframe, numa aba normal do navegador, e
+   * publicar os frames pelo mesmo transporte da sala. Quem assiste continua
+   * no Discord; só quem mostra sai.
+   * ====================================================================== */
+
+  /* URL base da aba companheira: o site real (CONFIG.activityUrl) quando
+     configurado — fora do proxy do Discord, a CSP não atrapalha — ou a
+     origem atual. Aponta sempre para capture.html, a página de captura. */
+  function companionBaseUrl() {
+    var configured = (CONFIG.activityUrl || '').trim();
+    if (configured && configured !== 'SEU_URL_PUBLICADA') {
+      return configured.replace(/\/+$/, '') + '/capture.html';
+    }
+    /* mesmo diretório do app atual, mas a página de captura */
+    var dir = window.location.pathname.replace(/[^/]*$/, '');
+    return window.location.origin + dir + 'capture.html';
+  }
+
+  /* URL efetiva do broker/relay que a Activity está usando AGORA. A aba
+     companheira precisa falar com o mesmo destino — se a Activity está atrás
+     do proxy do Discord, o broker também precisa estar. */
+  function companionTransportUrls() {
+    var brokers = CONFIG.brokerUrls.slice();
+    var broker = brokers[0] || '';
+    var relay = relayUrl();
+
+    if (IN_DISCORD_PROXY) {
+      var host = window.location.host;
+      broker = 'wss://' + host + '/broker/mqtt';
+      brokers = [broker];
+      relay = 'wss://' + host;
+    }
+    return {
+      broker: broker,
+      brokers: brokers,
+      relay: relay,
+      mqttPrefix: CONFIG.mqttPrefix,
+      socketPath: CONFIG.socketIoPath
+    };
+  }
+
+  /* Monta a URL da aba companheira com a identidade da sala. */
+  function companionUrl() {
+    var urls = companionTransportUrls();
+    var q = new URLSearchParams();
+    q.set('capture', '1');
+    q.set('room', state.roomId || '');
+    q.set('user', state.user.id || '');
+    q.set('name', state.user.username || '');
+    q.set('transport', CONFIG.transport);
+    q.set('broker', urls.broker);
+    q.set('brokers', urls.brokers.join(','));
+    q.set('relay', urls.relay);
+    q.set('mqtt', urls.mqttPrefix);
+    q.set('socketPath', urls.socketPath);
+    return companionBaseUrl() + '?' + q.toString();
+  }
+
+  /* Abre a aba companheira no navegador do usuário. */
+  function openCompanionTab() {
+    var url = companionUrl();
+    showToast('O Discord bloqueia a captura de tela dentro da Activity — abrindo uma aba no seu navegador.', 'info', 7000);
+
+    /* 1) API do Discord: abre no navegador padrão (fora do sandbox). */
+    if (state.sdk && state.sdk.commands && typeof state.sdk.commands.openExternalLink === 'function') {
+      try {
+        state.sdk.commands.openExternalLink({ url: url }).then(function () {
+          showToast('Clique em "Compartilhar minha tela" na aba que abriu. Você pode voltar ao Discord.', 'success', 9000);
+        }).catch(function (err) {
+          console.warn('[YKS] openExternalLink falhou:', err);
+          openCompanionFallback(url);
+        });
+        return;
+      } catch (e) {
+        console.warn('[YKS] openExternalLink indisponível:', e);
+      }
+    }
+
+    openCompanionFallback(url);
+  }
+
+  /* 2) Sem o SDK do Discord: abre uma janela nova. 3) Último recurso: mostra
+     o link para o usuário abrir e copiar. */
+  function openCompanionFallback(url) {
+    var win = null;
+    try {
+      win = window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      win = null;
+    }
+    if (win) {
+      showToast('Clique em "Compartilhar minha tela" na aba que abriu. Você pode voltar ao Discord.', 'success', 9000);
+      return;
+    }
+
+    showToast('Não foi possível abrir a aba automaticamente. Abra o link abaixo para compartilhar a tela.', 'error', 12000);
+    showCompanionLink(url);
+  }
+
+  /* Mostra o link da aba companheira para copiar (e abrir à mão). */
+  function showCompanionLink(url) {
+    var box = document.getElementById('companionLink');
+    if (!box) return;
+    var input = box.querySelector('input');
+    if (input) input.value = url;
+    box.hidden = false;
+    if (input) input.select();
   }
 
   /* Copia o código da sala (para uso fora do Discord). */
@@ -1408,6 +1352,27 @@
     els.btnLeave.addEventListener('click', leaveRoom);
     if (els.copyRoomBtn) els.copyRoomBtn.addEventListener('click', copyRoomCode);
 
+    var companionCopy = document.getElementById('companionCopy');
+    if (companionCopy) {
+      companionCopy.addEventListener('click', function () {
+        var box = document.getElementById('companionLink');
+        var input = box && box.querySelector('input');
+        if (!input) return;
+        input.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        if (!ok && navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(input.value).then(function () {
+            showToast('Link copiado.', 'success');
+          }).catch(function () {
+            showToast('Copie o link manualmente.', 'error');
+          });
+          return;
+        }
+        showToast(ok ? 'Link copiado.' : 'Copie o link manualmente.', ok ? 'success' : 'error');
+      });
+    }
+
     window.addEventListener('beforeunload', function () {
       Object.keys(publishersByType).forEach(function (type) { stopPublishing(type); });
       sendMeta({ t: 'bye', user: state.user });
@@ -1421,11 +1386,32 @@
     updateRoster();
     updateGrid();   /* estado inicial: nenhum tile -> mostra o estado vazio */
 
+    startCompanionWatchdog();
+
     initDiscord()
-      .then(function (sdk) { return resolveRoom(sdk).then(function () { return sdk; }); })
-      .then(function (sdk) { return resolveUser(sdk).then(function () { return sdk; }); })
       .then(function (sdk) {
-        subscribeParticipants(sdk);
+        if (!sdk) {
+          /* Fora do Discord (site aberto direto): sala e usuário vêm da URL. */
+          state.roomId = (params.get('room') || '').trim();
+          if (!state.roomId) {
+            throw new Error('Informe a sala com ?room=CODIGO (ou abra a Activity dentro do Discord).');
+          }
+          setRoomChip('Sala ' + state.roomId);
+          state.user = {
+            id: (params.get('user') || '').trim() || ('web-' + randomId(8)),
+            username: (params.get('name') || '').trim() || 'Visitante',
+            avatar: null
+          };
+          return null;
+        }
+        return resolveRoom(sdk).then(function () { return sdk; });
+      })
+      .then(function (sdk) {
+        if (!sdk) return null;
+        return resolveUser(sdk).then(function () { return sdk; });
+      })
+      .then(function (sdk) {
+        if (sdk) subscribeParticipants(sdk);
         updateRoster();          /* agora já sabemos quem é o próprio usuário */
         setNetChip('warn', 'Conectando…');
         if (els.roomCode) els.roomCode.textContent = state.roomId;
@@ -1475,6 +1461,10 @@
         );
       });
   }
+
+  /* Ganchos de depuração (console do navegador). */
+  window.__yks.companionUrl = companionUrl;
+  window.__yks.canCaptureHere = window.YKS_ERRORS.canCaptureHere;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);

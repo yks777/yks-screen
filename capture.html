@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>YKS-Screen — Compartilhando tela</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="capture.css">
+</head>
+<body class="capture">
+
+  <main class="capture__wrap">
+    <header class="capture__head">
+      <span class="capture__brand"><span class="capture__dot"></span>YKS-SCREEN</span>
+      <span class="capture__chip" id="capRoom">Sala —</span>
+      <span class="capture__chip" id="capStatus" data-state="warn">Conectando…</span>
+    </header>
+
+    <section class="capture__stage">
+      <div class="capture__preview" id="capPreview">
+        <video id="capVideo" muted playsinline></video>
+        <div class="capture__idle" id="capIdle">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg>
+          <p>Nada sendo compartilhado ainda.</p>
+        </div>
+      </div>
+
+      <div class="capture__actions">
+        <button class="capture__btn capture__btn--primary" id="capStart" type="button">
+          Compartilhar minha tela
+        </button>
+        <button class="capture__btn capture__btn--danger" id="capStop" type="button" hidden>
+          Parar compartilhamento
+        </button>
+      </div>
+
+      <p class="capture__note" id="capNote">
+        Clique em <strong>Compartilhar minha tela</strong> e escolha a janela ou a tela
+        que deseja mostrar. Depois você pode voltar ao Discord — a transmissão
+        continua enquanto esta aba estiver aberta.
+      </p>
+
+      <p class="capture__error" id="capError" hidden></p>
+    </section>
+  </main>
+
+  <!-- ============================================================
+       Bibliotecas (sem build). A captura de tela NÃO funciona dentro
+       do iframe do Discord (política "display-capture"): por isso esta
+       aba é aberta no navegador do usuário, fora do sandbox.
+       ============================================================ -->
+  <script src="mqtt.js"></script>
+  <script src="config.js"></script>
+  <script src="frames.js"></script>
+  <script src="media-errors.js"></script>
+  <script src="transport.js"></script>
+  <script src="broadcast.js"></script>
+  <script src="capture.js"></script>
+</body>
+</html>

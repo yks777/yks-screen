@@ -121,6 +121,18 @@
   <!-- Toasts (feedback de erros/sucesso) -->
   <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
 
+  <!-- Link manual da aba companheira (usado quando o navegador bloqueia a
+       abertura automática de uma nova aba) -->
+  <div class="companion" id="companionLink" hidden>
+    <p class="companion__text">
+      Abra este link no navegador para compartilhar sua tela:
+    </p>
+    <div class="companion__row">
+      <input class="companion__input" type="text" readonly aria-label="Link da aba de compartilhamento">
+      <button class="companion__copy" type="button" id="companionCopy">Copiar</button>
+    </div>
+  </div>
+
   <noscript>
     <div class="noscript">O YKS-Screen precisa de JavaScript ativado para funcionar.</div>
   </noscript>
@@ -134,6 +146,11 @@
 
   <!-- Cliente MQTT 3.1.1 mínimo (sem dependências) — transporte padrão -->
   <script src="mqtt.js"></script>
+  <script src="config.js"></script>
+  <script src="frames.js"></script>
+  <script src="media-errors.js"></script>
+  <script src="transport.js"></script>
+  <script src="broadcast.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
