@@ -119,8 +119,9 @@
       relayUrl: relayUrl,
       socketPath: socketPath,
       socketIoSources: [
-        '/socketio/4.7.5/socket.io.min.js',
-        'https://cdn.socket.io/4.7.5/socket.io.min.js'
+        'vendor/socket.io.min.js',
+        '/socketio/4.8.4/socket.io.min.js',
+        'https://cdn.socket.io/4.8.4/socket.io.min.js'
       ],
       /* Não assina o fluxo de vídeo: esta aba só publica. */
       subscribeMedia: false,

@@ -44,6 +44,23 @@
 
   var params = new URLSearchParams(window.location.search);
 
+  /* ----------------------------------------------------------------------
+   * Prefixos dos URL Mappings (Portal do Desenvolvedor > Activities).
+   * O prefixo é a parte que o proxy do Discord usa para decidir para onde
+   * encaminhar a requisição. O TARGET é sempre um HOST (sem protocolo) e
+   * pode ter porta (ex.: broker.emqx.io:8084) — quem fala com o destino é o
+   * proxy, não o navegador.
+   * -------------------------------------------------------------------- */
+  var SDK_PREFIX = '/sdk';
+  var BROKER_PREFIX = (params.get('brokerPrefix') || '/broker').trim();
+  var RELAY_PREFIX = (params.get('relayPrefix') || '/relay').trim();
+
+  /* Host público do relay (sem protocolo e sem porta: o proxy do Discord só
+     fala com destinos na 443). */
+  var RELAY_TARGET = (params.get('relay') || 'relay.exemplo.com').trim();
+  var HAS_RELAY = !!RELAY_TARGET && RELAY_TARGET !== 'relay.exemplo.com' &&
+    RELAY_TARGET !== 'SEU_RELAY';
+
   var CONFIG = {
     /* Application ID do Discord (OAuth2 Client ID) — Portal do Desenvolvedor
        > General Information > Application ID. */
@@ -59,26 +76,37 @@
      * URL Mappings (Portal do Desenvolvedor > Activities > URL Mappings)
      *   PREFIX     | TARGET
      *   /          | seu-app.exemplo.com   <- a própria Activity
-     *   /broker    | broker.emqx.io:8084   <- broker MQTT (WSS)
      *   /sdk       | cdn.jsdelivr.net       <- SDK do Discord
-     *   /socketio  | cdn.socket.io          <- Socket.IO (opcional)
+     *   /broker    | broker.emqx.io:8084   <- broker MQTT (WSS)   [opcional]
+     *   /relay     | relay.exemplo.com      <- relay próprio       [opcional]
      *
      * O TARGET é sempre um HOST (sem protocolo) e precisa apontar para um
      * diretório. O patchUrlMappings() do SDK reescreve
      *   wss://broker.emqx.io:8084/mqtt
-     *     -> wss://<client_id>.discordsays.com/broker/mqtt
+     *     -> wss://<client_id>.discordsays.com:8084/broker/mqtt
      * e o proxy do Discord encaminha para o broker real.
+     *
+     * ATENÇÃO (porta): a CSP do proxy do Discord só autoriza WebSocket em
+     *   wss://<client_id>.discordsays.com/  (porta 443)
+     * Logo, a URL que o BROWSER abre precisa ser SEM porta — é o que o
+     * transporte faz agora (monta a URL do proxy na 443). O TARGET pode
+     * manter a porta (broker.emqx.io:8084) porque quem fala com o broker
+     * é o proxy, não o browser.
      * ------------------------------------------------------------------ */
     urlMappings: [
-      { prefix: '/broker', target: 'broker.emqx.io:8084' },
-      { prefix: '/sdk', target: 'cdn.jsdelivr.net' },
-      { prefix: '/socketio', target: 'cdn.socket.io' }
-    ],
+      { prefix: SDK_PREFIX, target: 'cdn.jsdelivr.net' },
+      { prefix: BROKER_PREFIX, target: 'broker.emqx.io:8084' }
+    ].concat(HAS_RELAY ? [{ prefix: RELAY_PREFIX, target: RELAY_TARGET }] : []),
 
     /* ------------------------------------------------------------------
-     * Transporte: 'mqtt' (padrão, sem servidor) | 'socketio' (relay próprio)
+     * Transporte: '' = automático | 'mqtt' | 'socketio'
+     *
+     * Automático: 'mqtt' (broker público) fora do Discord; dentro do
+     * proxy do Discord o broker público só funciona se o Portal tiver o
+     * URL Mapping /broker — o transporte monta a URL do PROXY (porta 443),
+     * que é a única que a CSP do proxy aceita.
      * ------------------------------------------------------------------ */
-    transport: params.get('transport') || 'mqtt',
+    transport: (params.get('transport') || '').trim(),
 
     /* Brokers MQTT públicos (WSS). Nenhum cadastro, nenhuma chave.
        O primeiro que responder é usado; os outros são fallback.
@@ -90,21 +118,28 @@
     /* Prefixo dos tópicos MQTT. */
     mqttPrefix: 'yks',
 
-    /* Relay Socket.IO (só usado com transport=socketio). */
-    relayTarget: params.get('relay') || 'relay.exemplo.com',
-    relayPrefix: '/socket',
+    /* Relay Socket.IO (usado com transport=socketio).
+       relayTarget = HOST público do relay, SEM porta (tem que estar em 443
+       para o proxy do Discord conseguir falar com ele). */
+    relayTarget: RELAY_TARGET,
     socketIoPath: params.get('socketPath') || '/ws',
-    devRelayUrl: params.get('devRelay') || 'ws://localhost:8080/ws',
 
     /* Fontes do SDK: 1ª = via URL Mapping (funciona no Discord),
-       2ª = CDN direto (funciona em desenvolvimento local). */
+       2ª = CDN direto (funciona em desenvolvimento local).
+       Dentro do Discord a 2ª é SEMPRE bloqueada pela CSP do proxy
+       (script-src não inclui cdn.jsdelivr.net) — ela existe só para o
+       desenvolvimento local. */
     sdkSources: [
-      '/sdk/npm/@discord/embedded-app-sdk@2.5.0/output/index.mjs',
+      SDK_PREFIX + '/npm/@discord/embedded-app-sdk@2.5.0/output/index.mjs',
       'https://cdn.jsdelivr.net/npm/@discord/embedded-app-sdk@2.5.0/output/index.mjs'
     ],
+    /* Cliente do Socket.IO: cópia local (vendor/) — assim o transporte
+       'socketio' não depende de CDN nem de URL Mapping extra. O CDN fica
+       como último recurso. */
     socketIoSources: [
-      '/socketio/4.7.5/socket.io.min.js',
-      'https://cdn.socket.io/4.7.5/socket.io.min.js'
+      'vendor/socket.io.min.js',
+      '/socketio/4.8.4/socket.io.min.js',
+      'https://cdn.socket.io/4.8.4/socket.io.min.js'
     ],
 
     /* Modo simulado: usa o DiscordSDKMock do SDK oficial, permitindo rodar
@@ -256,11 +291,54 @@
    * 5. CARREGAMENTO DAS BIBLIOTECAS (CDN, com fallback)
    * ====================================================================== */
 
-  /* Carrega o SDK (ESM) via import() dinâmico, tentando as fontes em ordem. */
+  /* Carrega o SDK (ESM) via import() dinâmico, tentando as fontes em ordem.
+
+     Cada falha é guardada: sem isso, o erro mostrado é sempre o da ÚLTIMA
+     fonte (o CDN direto), que dentro do Discord é bloqueado pela CSP do
+     proxy — ou seja, a mensagem aponta para o lado errado do problema.
+     A fonte que realmente falhou (o URL Mapping /sdk) fica escondida. */
   function loadSdk(sources) {
+    var failures = [];
+
     return sources.reduce(function (chain, src) {
-      return chain.catch(function () { return import(src); });
-    }, Promise.reject(new Error('nenhuma fonte')));
+      return chain.catch(function () {
+        return import(src).catch(function (err) {
+          failures.push({ src: src, message: (err && err.message) || String(err) });
+          throw err;
+        });
+      });
+    }, Promise.reject(new Error('nenhuma fonte'))).catch(function (err) {
+      var error = new Error('Falha ao carregar o SDK do Discord.');
+      error.failures = failures;
+      error.cause = err;
+      throw error;
+    });
+  }
+
+  /* Confere ANTES do import se o URL Mapping do SDK existe.
+
+     Um import que dá 404 e um import bloqueado pela CSP dão a MESMA
+     mensagem ("Failed to fetch dynamically imported module"). Esta sondagem
+     distingue os dois casos: o proxy responde 404 quando o prefixo não
+     está cadastrado no Portal do Desenvolvedor. */
+  function preflightSdk() {
+    if (!IN_DISCORD_PROXY) return Promise.resolve(null);
+
+    var url = CONFIG.sdkSources[0];
+    return fetch(url, { method: 'GET', cache: 'no-store' }).then(function (res) {
+      if (res.status === 404) {
+        var error = new Error('URL Mapping do SDK ausente');
+        error.status = 404;
+        error.kind = 'sdk';
+        error.url = url;
+        throw error;
+      }
+      return null;
+    }).catch(function (err) {
+      /* Só o 404 é conclusivo: rede instável não deve impedir o import. */
+      if (err && err.status === 404) throw err;
+      return null;
+    });
   }
 
   /* ======================================================================
@@ -290,55 +368,84 @@
       return Promise.resolve(null);
     }
 
-    return loadSdk(CONFIG.sdkSources).then(function (sdk) {
-      /* ----------------------------------------------------------------
-       * patchUrlMappings(): DEVE ser chamado ANTES de qualquer requisição
-       * para um domínio externo. Ele reescreve window.fetch, window.WebSocket
-       * e XMLHttpRequest.open para que as URLs mapeadas passem pelo proxy
-       * do Discord em vez de serem bloqueadas por CSP ("blocked:csp").
-       *
-       * Exemplo (produção):
-       *   wss://broker.emqx.io:8084/mqtt
-       *     -> wss://<client_id>.discordsays.com/broker/mqtt
-       * e o proxy do Discord encaminha para o broker real.
-       * ---------------------------------------------------------------- */
-      if (IN_DISCORD_PROXY && typeof sdk.patchUrlMappings === 'function') {
-        try {
-          patchUrlMappings(sdk, CONFIG.urlMappings);
-          console.info('[YKS] patchUrlMappings aplicado:', JSON.stringify(CONFIG.urlMappings));
-        } catch (e) {
-          console.warn('[YKS] falha ao aplicar patchUrlMappings:', e);
+    return preflightSdk()
+      .then(function () { return loadSdk(CONFIG.sdkSources); })
+      .then(function (sdk) {
+        /* --------------------------------------------------------------
+         * patchUrlMappings(): DEVE ser chamado ANTES de qualquer requisição
+         * para um domínio externo. Ele reescreve window.fetch,
+         * window.WebSocket e XMLHttpRequest.open para que as URLs mapeadas
+         * passem pelo proxy do Discord em vez de serem bloqueadas por CSP
+         * ("blocked:csp").
+         *
+         * Aqui o WebSocket NÃO é patcheado de propósito: o remapeamento do
+         * SDK mantém a porta da URL original (wss://broker.emqx.io:8084 ->
+         * wss://<client_id>.discordsays.com:8084/...) e a CSP do proxy só
+         * autoriza a porta 443 do próprio proxy. O transporte monta a URL
+         * do proxy na 443 por conta própria (ver transport.js).
+         * -------------------------------------------------------------- */
+        if (IN_DISCORD_PROXY && typeof sdk.patchUrlMappings === 'function') {
+          try {
+            patchUrlMappings(sdk, CONFIG.urlMappings);
+            console.info('[YKS] patchUrlMappings aplicado:', JSON.stringify(CONFIG.urlMappings));
+          } catch (e) {
+            console.warn('[YKS] falha ao aplicar patchUrlMappings:', e);
+          }
         }
-      }
 
-      var sdkInstance;
-      if (CONFIG.mock) {
-        /* Modo simulado: mesmo contrato de API, sem Discord. */
-        sdkInstance = new sdk.DiscordSDKMock(
-          CONFIG.clientId, '999999999999999999', CONFIG.mockChannelId, 'mock-location'
-        );
-      } else {
-        sdkInstance = new sdk.DiscordSDK(CONFIG.clientId);
-      }
+        var sdkInstance;
+        if (CONFIG.mock) {
+          /* Modo simulado: mesmo contrato de API, sem Discord. */
+          sdkInstance = new sdk.DiscordSDKMock(
+            CONFIG.clientId, '999999999999999999', CONFIG.mockChannelId, 'mock-location'
+          );
+        } else {
+          sdkInstance = new sdk.DiscordSDK(CONFIG.clientId);
+        }
 
-      return sdkInstance.ready().then(function () { return sdkInstance; });
-    }).catch(function (err) {
-      throw new Error(describeInitError(err));
-    });
+        return sdkInstance.ready().then(function () { return sdkInstance; });
+      }).catch(function (err) {
+        throw new Error(describeInitError(err));
+      });
   }
 
   /* Transforma o erro bruto de inicialização em uma mensagem acionável. */
   function describeInitError(err) {
     var msg = (err && err.message) || String(err);
 
+    /* A causa mais comum não é o Application ID — é a versão antiga do
+       app.js servida (cache do navegador ou publicação atrasada). Por isso a
+       mensagem mostra o valor EFETIVO: se aparecer o placeholder, é a
+       versão velha; se aparecer o ID, o problema é outro. */
     if (!CONFIG.clientId || CONFIG.clientId === 'SEU_CLIENT_ID') {
-      return 'Application ID do Discord não configurado: troque CONFIG.clientId no app.js pelo ' +
-        'Application ID do Portal do Desenvolvedor (ou passe ?clientId=...).';
+      return 'Application ID do Discord não configurado (valor atual: "' +
+        (CONFIG.clientId || 'vazio') + '"). Atualize o app.js publicado e recarregue ' +
+        'sem cache (Ctrl+Shift+R).';
     }
-    if (/dynamically imported module|Failed to fetch|import\(/i.test(msg)) {
-      return 'Não foi possível carregar o SDK do Discord (' + msg + '). Verifique o URL Mapping ' +
-        '/sdk no Portal do Desenvolvedor e a sua conexão.';
+
+    /* O proxy do Discord respondeu 404 para o caminho do SDK: o URL Mapping
+       /sdk não está cadastrado (ou foi salvo sem "salvar"). */
+    if (err && err.status === 404 && err.kind === 'sdk') {
+      return 'O URL Mapping do SDK não está configurado: o proxy do Discord devolveu 404 para ' +
+        (err.url || CONFIG.sdkSources[0]) + '. No Portal do Desenvolvedor > Activities > ' +
+        'URL Mappings, cadastre PREFIX ' + SDK_PREFIX + ' | TARGET cdn.jsdelivr.net e salve.';
     }
+
+    /* Idem para o transporte: o prefixo /broker (ou /relay) não existe. */
+    if (err && err.status === 404) {
+      var prefix = err.kind === 'mqtt' ? BROKER_PREFIX : RELAY_PREFIX;
+      var target = err.kind === 'mqtt' ? 'broker.emqx.io:8084' : CONFIG.relayTarget;
+      return 'O URL Mapping do transporte não está configurado: o proxy do Discord devolveu 404 para ' +
+        (err.url || prefix) + '. No Portal do Desenvolvedor > Activities > URL Mappings, cadastre ' +
+        'PREFIX ' + prefix + ' | TARGET ' + target + ' e salve.';
+    }
+
+    /* Falha de import: mostra o que foi tentado e por quê. */
+    if ((err && err.failures && err.failures.length) ||
+        /dynamically imported module|Failed to fetch|import\(/i.test(msg)) {
+      return describeSdkLoadFailures(err);
+    }
+
     if (!insideDiscordFrame() && !CONFIG.mock) {
       return 'O SDK do Discord não respondeu (' + msg + '). Fora do Discord, use ?room=CODIGO ' +
         'para entrar numa sala.';
@@ -347,9 +454,37 @@
       'e abra a Activity a partir de um canal de voz.';
   }
 
-  /* Aplica as URL Mappings (helper isolado para tratamento de erro). */
+  /* Detalha as falhas de carregamento do SDK, fonte por fonte. */
+  function describeSdkLoadFailures(err) {
+    var failures = (err && err.failures) || [];
+    var mapped = failures.filter(function (f) { return f.src.charAt(0) === '/'; });
+    var direct = failures.filter(function (f) { return /^https?:/i.test(f.src); });
+    var parts = [];
+
+    parts.push('Não foi possível carregar o SDK do Discord.');
+
+    if (mapped.length) {
+      parts.push('O proxy do Discord não devolveu o SDK em "' + mapped[0].src + '" ' +
+        '(404 = URL Mapping ausente). Cadastre no Portal do Desenvolvedor > Activities > ' +
+        'URL Mappings: PREFIX ' + SDK_PREFIX + ' | TARGET cdn.jsdelivr.net.');
+    }
+    if (direct.length) {
+      parts.push('O CDN direto (' + direct[0].src + ') é bloqueado pela CSP do proxy do ' +
+        'Discord (script-src não inclui cdn.jsdelivr.net) — isso é esperado dentro do ' +
+        'Discord e não é a causa do erro.');
+    }
+    if (!mapped.length && !direct.length) {
+      parts.push('Detalhe: ' + ((err && err.message) || err));
+    }
+
+    return parts.join(' ');
+  }
+
+  /* Aplica as URL Mappings (helper isolado para tratamento de erro).
+     O WebSocket não é patcheado: o remapeamento do SDK preserva a porta da
+     URL original e a CSP do proxy só aceita a porta 443 do proxy. */
   function patchUrlMappings(sdk, mappings) {
-    sdk.patchUrlMappings(mappings);
+    sdk.patchUrlMappings(mappings, { patchWebSocket: false });
   }
 
   /* Descobre o canal de voz atual e o transforma no ID da sala. */
@@ -462,29 +597,97 @@
 
   /* --- Transporte (implementação em transport.js) ----------------------- */
 
-  /* URL do relay: a origem pura (o namespace do Socket.IO vem do path).
-     Dentro do Discord usa o host mapeado; fora, o relay local de dev. */
-  function relayUrl() {
-    var useExternal = /\.discordsays\.com$/.test(window.location.hostname) ||
-      params.get('external') === '1';
-    return window.YKS_TRANSPORT.computeRelayUrl({
-      external: useExternal,
-      target: CONFIG.relayTarget,
-      devUrl: CONFIG.devRelayUrl
+  /* Qual transporte usar.
+     - 'mqtt'     : broker MQTT público (funciona fora do Discord e dentro
+                    do Discord SE o Portal tiver o URL Mapping /broker).
+     - 'socketio' : relay próprio (funciona dentro do Discord desde que o
+                    relay esteja numa URL https/wss na porta 443 e o Portal
+                    tenha o URL Mapping /relay).
+     Automático: 'mqtt' por padrão; 'socketio' quando o relay está
+     configurado (parâmetro ?relay=host ou CONFIG.relayTarget). */
+  function transportKind() {
+    if (CONFIG.transport) return CONFIG.transport;
+    if (hasRelay()) return 'socketio';
+    return 'mqtt';
+  }
+
+  /* O relay está configurado? (host público diferente do placeholder) */
+  function hasRelay() {
+    return HAS_RELAY;
+  }
+
+  /* Endpoint do relay.
+     Dentro do Discord o WebSocket tem que apontar para o PRÓPRIO proxy do
+     Discord, na porta 443 (é o que a CSP permite) e com o prefixo do URL
+     Mapping na frente (/relay/ws -> o proxy encaminha para <host>/ws).
+     Fora do Discord, o relay público é acessado direto. */
+  function relayEndpoint() {
+    if (IN_DISCORD_PROXY) {
+      return {
+        url: 'wss://' + window.location.host,
+        path: RELAY_PREFIX + CONFIG.socketIoPath
+      };
+    }
+    /* Desenvolvimento local: relay na máquina, sem TLS.
+       (?devRelay=ws://localhost:8080/ws) */
+    var devRelay = (params.get('devRelay') || '').trim();
+    if (/^(wss?|https?):\/\//i.test(devRelay)) {
+      return {
+        url: devRelay.replace(/\/+$/, '').replace(/\/ws$/, ''),
+        path: CONFIG.socketIoPath
+      };
+    }
+    return { url: 'wss://' + CONFIG.relayTarget, path: CONFIG.socketIoPath };
+  }
+
+  /* Confere ANTES de abrir o WebSocket se o URL Mapping do transporte
+     existe no Portal do Desenvolvedor.
+
+     Sem isso o app fica em "Reconectando…" para sempre: o proxy do Discord
+     responde 404 em qualquer prefixo que não esteja cadastrado, e o
+     WebSocket só reporta "handshake falhou". Uma requisição HTTP comum no
+     mesmo caminho revela o 404 na hora. */
+  function preflightTransport(kind) {
+    if (!IN_DISCORD_PROXY) return Promise.resolve(null);
+
+    var path = kind === 'mqtt'
+      ? BROKER_PREFIX + '/mqtt'
+      : RELAY_PREFIX + CONFIG.socketIoPath;
+
+    return fetch(path, { method: 'GET', cache: 'no-store' }).then(function (res) {
+      if (res.status === 404) {
+        var error = new Error('URL Mapping do transporte ausente');
+        error.status = 404;
+        error.url = path;
+        error.kind = kind;
+        throw error;
+      }
+      return null;
+    }).catch(function (err) {
+      /* Só o 404 é conclusivo (rede instável não deve travar o app). */
+      if (err && err.status === 404) throw err;
+      return null;
     });
   }
 
   /* Cria o transporte da sala. */
   function createTransport(room, handlers) {
+    var kind = transportKind();
+    var relay = relayEndpoint();
+
     return window.YKS_TRANSPORT.create({
-      kind: CONFIG.transport,
+      kind: kind,
       room: room,
       user: state.user,
       guildId: state.guildId,
       mqttPrefix: CONFIG.mqttPrefix,
       brokerUrls: CONFIG.brokerUrls,
-      relayUrl: relayUrl(),
-      socketPath: CONFIG.socketIoPath,
+      /* Dentro do proxy do Discord o WebSocket vai para a porta 443 do
+         proxy (única autorizada pela CSP). Fora, vai direto ao destino. */
+      proxyBase: IN_DISCORD_PROXY ? ('wss://' + window.location.host) : null,
+      proxyPath: kind === 'mqtt' ? BROKER_PREFIX : RELAY_PREFIX,
+      relayUrl: relay.url,
+      socketPath: relay.path,
       socketIoSources: CONFIG.socketIoSources,
       subscribeMedia: true,
       stats: stats,
@@ -1225,24 +1428,22 @@
     return window.location.origin + dir + 'capture.html';
   }
 
-  /* URL efetiva do broker/relay que a Activity está usando AGORA. A aba
-     companheira precisa falar com o mesmo destino — se a Activity está atrás
-     do proxy do Discord, o broker também precisa estar. */
+  /* URL efetiva do broker/relay que a Activity está usando AGORA.
+
+     A aba companheira roda FORA do proxy do Discord (numa aba normal do
+     navegador), então ela fala DIRETO com o broker público ou com o relay
+     público — nunca com o proxy (que é um host do Discord, e o caminho
+     /broker/mqtt do proxy exigiria passar pelo mesmo CSP). O importante é
+     que ambos os lados cheguem ao MESMO destino lógico (o mesmo broker ou o
+     mesmo relay), para que a sala seja a mesma. */
   function companionTransportUrls() {
     var brokers = CONFIG.brokerUrls.slice();
-    var broker = brokers[0] || '';
-    var relay = relayUrl();
 
-    if (IN_DISCORD_PROXY) {
-      var host = window.location.host;
-      broker = 'wss://' + host + '/broker/mqtt';
-      brokers = [broker];
-      relay = 'wss://' + host;
-    }
     return {
-      broker: broker,
+      kind: transportKind(),
+      broker: brokers[0] || '',
       brokers: brokers,
-      relay: relay,
+      relay: 'wss://' + CONFIG.relayTarget,
       mqttPrefix: CONFIG.mqttPrefix,
       socketPath: CONFIG.socketIoPath
     };
@@ -1256,7 +1457,7 @@
     q.set('room', state.roomId || '');
     q.set('user', state.user.id || '');
     q.set('name', state.user.username || '');
-    q.set('transport', CONFIG.transport);
+    q.set('transport', urls.kind);
     q.set('broker', urls.broker);
     q.set('brokers', urls.brokers.join(','));
     q.set('relay', urls.relay);
@@ -1345,6 +1546,31 @@
    * 14. BOOT
    * ====================================================================== */
 
+  /* Explica a falha de transporte do jeito mais provável de cada cenário.
+
+     Dentro do proxy do Discord a causa quase sempre é a CSP do proxy:
+     ele só autoriza WebSocket em wss://<client_id>.discordsays.com/ (443).
+     O remapeamento do SDK mantém a porta do destino (wss://broker:8084 ->
+     wss://<client_id>.discordsays.com:8084/...), e essa URL é bloqueada.
+     Por isso o transporte monta a URL do proxy na 443. */
+  function transportErrorHint(detail) {
+    var kind = transportKind();
+    var extra = detail ? ' (' + detail + ')' : '';
+
+    if (!IN_DISCORD_PROXY) {
+      return 'Sem conexão com o transporte de mídia' + extra + '. Verifique a internet e, se usar o relay, se ele está no ar.';
+    }
+    if (kind === 'socketio') {
+      return 'O proxy do Discord não conseguiu abrir o WebSocket do relay' + extra + '. ' +
+        'Verifique o URL Mapping ' + RELAY_PREFIX + ' → ' + CONFIG.relayTarget +
+        ' no Portal do Desenvolvedor (o relay precisa estar em HTTPS na porta 443).';
+    }
+    return 'O proxy do Discord não conseguiu abrir o WebSocket do broker' + extra + '. ' +
+      'Verifique o URL Mapping ' + BROKER_PREFIX + ' → broker.emqx.io:8084 no Portal do ' +
+      'Desenvolvedor (404 = prefixo não cadastrado). Se o proxy não aceitar destino com ' +
+      'porta, use um relay próprio (?transport=socketio).';
+  }
+
   function bindControls() {
     els.btnScreen.addEventListener('click', toggleScreen);
     els.btnCam.addEventListener('click', toggleCamera);
@@ -1416,47 +1642,57 @@
         setNetChip('warn', 'Conectando…');
         if (els.roomCode) els.roomCode.textContent = state.roomId;
 
-        /* Conecta ao transporte (broker MQTT público, por padrão). */
+        /* Conecta ao transporte (broker MQTT público ou relay próprio). */
         var warnedOutage = false;
-        state.transport = createTransport(state.roomId, {
-          status: function (status, detail) {
-            if (status === 'connected') {
-              state.connected = true;
-              warnedOutage = false;
-              setNetChip('ok', 'Conectado');
-              startPresence();
-            } else if (status === 'reconnecting') {
-              state.connected = false;
-              setNetChip('warn', 'Reconectando…');
-              if (!warnedOutage) {
-                warnedOutage = true;
-                showToast(
-                  'Sem conexão com o transporte de mídia. Verifique o URL Mapping no Portal do Desenvolvedor (ou a internet).',
-                  'error', 9000
-                );
+
+        return preflightTransport(transportKind()).then(function () {
+          state.transport = createTransport(state.roomId, {
+            status: function (status, detail) {
+              if (status === 'connected') {
+                state.connected = true;
+                warnedOutage = false;
+                setNetChip('ok', 'Conectado');
+                startPresence();
+              } else if (status === 'reconnecting') {
+                state.connected = false;
+                setNetChip('warn', 'Reconectando…');
+                if (!warnedOutage) {
+                  warnedOutage = true;
+                  showToast(transportErrorHint(detail), 'error', 12000);
+                }
+              } else if (status === 'error') {
+                state.connected = false;
+                setNetChip('err', 'Sem conexão');
+                console.error('[YKS] transporte:', detail);
+                if (!warnedOutage) {
+                  warnedOutage = true;
+                  showToast(transportErrorHint(detail), 'error', 12000);
+                }
               }
-            } else if (status === 'error') {
-              state.connected = false;
-              setNetChip('err', 'Sem conexão');
-              console.error('[YKS] transporte:', detail);
-              if (!warnedOutage) {
-                warnedOutage = true;
-                showToast(
-                  'Não foi possível conectar ao transporte de mídia. Verifique o URL Mapping no Portal do Desenvolvedor.',
-                  'error', 9000
-                );
-              }
-            }
-          },
-          meta: onTransportMeta,
-          media: handleRemoteMedia
+            },
+            meta: onTransportMeta,
+            media: handleRemoteMedia
+          });
         });
       })
       .catch(function (err) {
         console.error('[YKS] falha na inicialização:', err);
+        /* Diagnóstico: mostra qual versão do app está rodando de fato. */
+        console.info('[YKS] diagnóstico:', JSON.stringify({
+          clientId: CONFIG.clientId,
+          origem: window.location.origin,
+          host: window.location.host,
+          proxy: IN_DISCORD_PROXY,
+          dentroDeFrame: insideDiscordFrame(),
+          sala: state.roomId,
+          mock: CONFIG.mock
+        }));
         setNetChip('err', 'Erro');
+        /* Erros de configuração (404 de URL Mapping) têm mensagem própria;
+           os demais usam a mensagem original. */
+        var detail = (err && err.status) ? describeInitError(err) : ((err && err.message) || err);
         showToast(
-          'Não foi possível iniciar a Activity: ' + ((err && err.message) || err),
+          'Não foi possível iniciar a Activity: ' + detail,
           'error', 12000
         );
       });

@@ -51,22 +51,6 @@
     }, Promise.reject(new Error('nenhuma fonte')));
   }
 
-  /* Normaliza a URL do relay: a origem pura (o namespace do Socket.IO vem
-     na opção `path`). Fora do Discord usa o relay local de dev; dentro do
-     Discord usa o host mapeado. */
-  function computeRelayUrl(opts) {
-    var raw = opts.external ? 'wss://' + opts.target : opts.devUrl;
-    try {
-      var u = new URL(raw);
-      u.pathname = '/';
-      u.search = '';
-      u.hash = '';
-      return u.toString().replace(/\/$/, '');
-    } catch (e) {
-      return raw.replace(/\/+$/, '');
-    }
-  }
-
   /* Normaliza o payload binário do Socket.IO. Em alguns ambientes ele chega
      como Blob, e "new Uint8Array(blob)" resultaria num array VAZIO (sem erro
      visível — só a mídia que nunca apareceria). */
@@ -87,6 +71,21 @@
     var urls = opts.brokerUrls.slice();
     var client = null;
     var subscribeMedia = opts.subscribeMedia !== false;
+
+    /* Dentro do proxy do Discord o browser NÃO pode falar direto com o
+       broker: a CSP do proxy só autoriza WebSocket em
+       wss://<client_id>.discordsays.com/ (porta 443). Por isso, quando o
+       proxyBase vem preenchido, a URL do WebSocket é a do PRÓPRIO proxy,
+       com o prefixo do URL Mapping na frente:
+
+         wss://<client_id>.discordsays.com/broker/mqtt
+           -> o proxy encaminha para broker.emqx.io:8084/mqtt
+
+     (o remapeamento automático do SDK não serve aqui: ele preserva a porta
+     do destino e a CSP bloqueia tudo que não seja a porta 443 do proxy). */
+    if (opts.proxyBase && opts.proxyPath) {
+      urls = [opts.proxyBase.replace(/\/+$/, '') + opts.proxyPath + '/mqtt'];
+    }
 
     function connectNext() {
       var url = urls.shift();
@@ -158,6 +157,10 @@
     loadScript(opts.socketIoSources, 'io').then(function () {
       if (typeof window.io !== 'function') throw new Error('Socket.IO indisponível.');
 
+      /* relayUrl = origem (ex.: wss://<client_id>.discordsays.com) e
+         socketPath = caminho completo do Socket.IO (ex.: /relay/ws).
+         Dentro do proxy, o prefixo /relay faz o proxy encaminhar para
+         <host>/ws — é o mesmo relay, visto do outro lado. */
       socket = window.io(opts.relayUrl, {
         path: opts.socketPath,
         transports: ['websocket'],
@@ -202,7 +205,6 @@
 
   window.YKS_TRANSPORT = {
     create: create,
-    computeRelayUrl: computeRelayUrl,
     loadScript: loadScript
   };
 })();

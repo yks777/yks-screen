@@ -104,6 +104,7 @@
     this.keepaliveTimer = null;
     this.reconnectDelay = 1000;
     this.maxReconnectDelay = 15000;
+    this.lastError = null;
   }
 
   MqttClient.prototype._setStatus = function (status, detail) {
@@ -156,8 +157,9 @@
     };
 
     ws.onerror = function () {
-      /* O "close" seguinte traz o detalhe; não logamos aqui para evitar
-         duplicidade no console. */
+      /* O "close" seguinte traz o detalhe; guardamos algo útil aqui porque o
+         evento de erro do WebSocket não carrega mensagem no navegador. */
+      self.lastError = 'falha no WebSocket';
     };
 
     ws.onclose = function (event) {
@@ -166,7 +168,9 @@
       if (self.closed) {
         self._setStatus('closed');
       } else {
-        self._setStatus('reconnecting', event && event.reason);
+        var detail = (event && event.reason) || self.lastError ||
+          ('código ' + (event && event.code));
+        self._setStatus('reconnecting', detail);
         self._scheduleReconnect();
       }
     };
