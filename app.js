@@ -190,17 +190,23 @@
     if (!IN_DISCORD_PROXY) return Promise.resolve(null);
 
     var url = CONFIG.sdkSources[0];
-    return fetch(url, { method: 'GET', cache: 'no-store' }).then(function (res) {
-      if (res.status === 404) {
-        var error = new Error('URL Mapping do SDK ausente');
-        error.status = 404;
-        error.kind = 'sdk';
-        error.url = url;
-        throw error;
-      }
-      return null;
-    }).catch(function (err) {
-
+    return Promise.race([
+      fetch(url, { method: 'GET', cache: 'no-store' }).then(function (res) {
+        if (res.status === 404) {
+          var error = new Error('URL Mapping do SDK ausente');
+          error.status = 404;
+          error.kind = 'sdk';
+          error.url = url;
+          throw error;
+        }
+        return null;
+      }),
+      new Promise(function (_, reject) {
+        window.setTimeout(function () {
+          reject(new Error('Timeout ao verificar URL Mapping do SDK (/sdk).'));
+        }, 5000);
+      })
+    ]).catch(function (err) {
       if (err && err.status === 404) throw err;
       return null;
     });
@@ -1267,13 +1273,25 @@
 
     startCompanionWatchdog();
 
-    initDiscord()
+    Promise.race([
+      initDiscord(),
+      new Promise(function (_, reject) {
+        window.setTimeout(function () {
+          reject(new Error('Timeout ao inicializar a Activity (initDiscord).'));
+        }, 10000);
+      })
+    ])
       .then(function (sdk) {
         if (!sdk) {
 
           state.roomId = (params.get('room') || '').trim();
           if (!state.roomId) {
-            throw new Error('Informe a sala com ?room=CODIGO (ou abra a Activity dentro do Discord).');
+            setNetChip('err', 'Erro');
+            showToast(
+              'Não foi possível iniciar a Activity: não foi possível identificar a sala. Abra a Activity a partir de um canal de voz do Discord (a sala é o canal).',
+              'error', 12000
+            );
+            return null;
           }
           setRoomChip('Sala ' + state.roomId);
           state.user = {
