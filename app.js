@@ -242,7 +242,14 @@
           sdkInstance = new sdk.DiscordSDK(CONFIG.clientId);
         }
 
-        return sdkInstance.ready().then(function () { return sdkInstance; });
+        return Promise.race([
+          sdkInstance.ready().then(function () { return sdkInstance; }),
+          new Promise(function (_, reject) {
+            window.setTimeout(function () {
+              reject(new Error('O Discord não respondeu ao handshake da Activity (timeout do ready()). Verifique o Application ID e tente abrir a Activity de um canal de voz.'));
+            }, 8000);
+          })
+        ]);
       }).catch(function (err) {
         throw new Error(describeInitError(err));
       });
@@ -320,15 +327,13 @@
 
     var manualRoom = (params.get('room') || '').trim();
 
-    if (!channelId && !manualRoom) {
-      throw new Error('Não foi possível identificar o canal de voz. Abra a Activity a partir de um canal de voz (a sala é o canal).');
-    }
-
-    state.roomId = String(channelId || manualRoom);
+    state.roomId = String(channelId || manualRoom || '');
     state.guildId = sdk.guildId;
-    setRoomChip('Sala ' + state.roomId);
+    setRoomChip('Sala ' + (state.roomId || '—'));
 
-    if (!channelId) return Promise.resolve(state.roomId);
+    console.info('[YKS] sala resolvida:', state.roomId || '(sem sala — aguardando canal de voz ou ?room=)');
+
+    if (!state.roomId) return Promise.resolve(null);
 
     return sdk.commands.getChannel({ channel_id: channelId })
       .then(function (channel) {
@@ -1287,6 +1292,16 @@
       .then(function (sdk) {
         if (sdk) subscribeParticipants(sdk);
         updateRoster();
+
+        if (!state.roomId) {
+          setNetChip('err', 'Sem sala');
+          showToast(
+            'Não foi possível identificar a sala. Abra a Activity a partir de um canal de voz do Discord (a sala é o canal).',
+            'error', 12000
+          );
+          return null;
+        }
+
         setNetChip('warn', 'Conectando…');
         if (els.roomCode) els.roomCode.textContent = state.roomId;
 
