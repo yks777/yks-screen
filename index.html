@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>YKS-Screen — Sala de Reunião no Discord</title>
+  <meta name="description" content="YKS-Screen: sala de reunião P2P por WebSocket para Discord Activities. Compartilhe tela e câmera.">
+  <meta name="theme-color" content="#080808">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23080808'/%3E%3Crect x='11' y='11' width='10' height='10' rx='3' fill='%23ff2b1b'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ============================================================
+       SPLASH SCREEN — "Sharing Spinner" (disco vermelho girando).
+       CSS puro em styles.css, sem dependências. Fica por ~3s.
+       ============================================================ -->
+  <div class="splash" id="splash" role="status" aria-live="polite">
+    <div class="loader" id="loader" aria-hidden="true">
+      <div class="sharingon">
+        <div class="ring">
+          <div class="to"></div>
+          <div class="to"></div>
+          <div class="to"></div>
+          <div class="circle"></div>
+        </div>
+      </div>
+    </div>
+
+    <p class="splash__brand">YKS<span>-Screen</span></p>
+    <p class="splash__hint">entrando na sala…</p>
+  </div>
+
+  <!-- ============================================================
+       INTERFACE DA SALA
+       ============================================================ -->
+  <div class="app" id="app">
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand__mark" aria-hidden="true"></span>
+        <span class="brand__name">YKS<span>-Screen</span></span>
+        <!-- reaproveita o .record / .record-text do loader (ponto que pisca) -->
+        <span class="head-rec">
+          <span class="record"></span>
+          <span class="record-text">REC</span>
+        </span>
+      </div>
+
+      <div class="topbar__meta">
+        <span class="chip" id="roomChip" data-state="idle">Sala —</span>
+        <span class="chip" id="netChip" data-state="idle">Iniciando…</span>
+      </div>
+    </header>
+
+    <main class="stage">
+      <!-- grade de vídeos (telas e câmeras) -->
+      <section class="grid" id="grid" aria-label="Participantes da sala">
+        <div class="grid__empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+            <path d="M8 21h8M12 17v4"></path>
+          </svg>
+          <p class="grid__empty-title">Ninguém está transmitindo ainda</p>
+          <p class="grid__empty-hint">
+            Compartilhe sua <strong>tela</strong> ou ligue a <strong>câmera</strong> para os demais participantes.
+          </p>
+        </div>
+      </section>
+
+      <!-- lista de participantes -->
+      <aside class="roster" aria-label="Participantes">
+        <h2 class="roster__title">Participantes <span class="roster__count" id="rosterCount">0</span></h2>
+        <ul class="roster__list" id="rosterList"></ul>
+
+        <div class="roomcode">
+          <span class="roomcode__label">Código da sala</span>
+          <div class="roomcode__row">
+            <code class="roomcode__value" id="roomCode">—</code>
+            <button id="copyRoomBtn" class="roomcode__btn" type="button">Copiar</button>
+          </div>
+        </div>
+
+        <p class="roster__note">A sala é derivada do canal de voz do Discord. Todo mundo no mesmo canal compartilha a mesma sala.</p>
+      </aside>
+    </main>
+
+    <footer class="controls" role="toolbar" aria-label="Controles da sala">
+      <button id="btnScreen" class="ctl" type="button" aria-pressed="false">
+        <span class="ctl__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg>
+        </span>
+        <span class="ctl__label">Compartilhar tela</span>
+      </button>
+
+      <button id="btnCam" class="ctl" type="button" aria-pressed="false">
+        <span class="ctl__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 10.5"></path><rect x="2" y="6" width="14" height="12" rx="2"></rect></svg>
+        </span>
+        <span class="ctl__label">Ligar câmera</span>
+      </button>
+
+      <button id="btnMic" class="ctl" type="button" aria-pressed="false">
+        <span class="ctl__icon" aria-hidden="true">
+          <svg class="ico-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v3M8 21h8"></path></svg>
+          <svg class="ico-mic-off" viewBox="0 0 24 24"><path d="M2 2l20 20"></path><path d="M9 9v2a3 3 0 0 0 4.6 2.5M15 10.5V5a3 3 0 0 0-5.7-1.3"></path><path d="M17 16.9A7 7 0 0 1 5 11v-1M12 18v3M8 21h8"></path></svg>
+        </span>
+        <span class="ctl__label">Ativar microfone</span>
+      </button>
+
+      <button id="btnLeave" class="ctl ctl--danger" type="button">
+        <span class="ctl__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="m16 17 5-5-5-5M21 12H9"></path></svg>
+        </span>
+        <span class="ctl__label">Sair da sala</span>
+      </button>
+    </footer>
+  </div>
+
+  <!-- Toasts (feedback de erros/sucesso) -->
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <noscript>
+    <div class="noscript">O YKS-Screen precisa de JavaScript ativado para funcionar.</div>
+  </noscript>
+
+  <!-- ============================================================
+       Bibliotecas externas (CDN, sem build).
+       Dentro do Discord, carregue via URL Mappings (/sdk e /socketio)
+       para não ser bloqueado pela CSP do proxy — o app.js já tenta
+       as duas opções (mapeado primeiro, CDN direto depois).
+       ============================================================ -->
+
+  <!-- Cliente MQTT 3.1.1 mínimo (sem dependências) — transporte padrão -->
+  <script src="mqtt.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

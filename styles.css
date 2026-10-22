@@ -1,0 +1,995 @@
+/* ==========================================================================
+   YKS-Screen — styles.css
+   Tema escuro minimalista: preto + vermelho (#ff2b1b).
+   Sem dependências externas, sem build.
+
+   SUMÁRIO
+     1. Design tokens / reset
+     2. LOADER (Sharing Spinner)
+     3. Splash screen
+     4. Topbar
+     5. Palco (grade de vídeos) + roster
+     6. Controles
+     7. Toasts
+     8. Responsividade
+     9. prefers-reduced-motion
+   ========================================================================== */
+
+
+/* ==========================================================================
+   1. DESIGN TOKENS / RESET
+   ========================================================================== */
+
+:root {
+  /* Paleta: preto + vermelho. O vermelho é o ÚNICO acento. */
+  --c: #ff2b1b;                 /* acento principal (o vermelho do loader) */
+  --c-strong: #ff5a4d;          /* hover/realce */
+  --c-dim: rgba(255, 43, 27, .12);
+  --c-line: rgba(255, 43, 27, .30);
+  --c-ring: rgba(150, 20, 12, .55); /* anel interno do loader */
+
+  --bg: #080808;                /* fundo da página */
+  --surface: #0f0f10;           /* cartões */
+  --surface-2: #151517;         /* campos, chips */
+  --surface-3: #1c1c1f;         /* hover */
+  --line: #232326;              /* bordas */
+  --line-soft: rgba(255, 255, 255, .06);
+
+  --text: #f4f4f5;
+  --text-2: #a1a1a8;            /* secundário */
+  --text-3: #6e6e76;            /* terciário / labels */
+
+  --danger: #ff5f56;
+
+  --r-sm: 8px;
+  --r: 12px;
+  --r-lg: 16px;
+  --r-full: 999px;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px rgba(0, 0, 0, .35);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, .5), 0 24px 60px rgba(0, 0, 0, .45);
+
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --ease: cubic-bezier(.4, 0, .2, 1);
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(900px 520px at 75% -12%, rgba(255, 43, 27, .06), transparent 62%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -.005em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100%;
+}
+
+h1, h2, h3, p { margin: 0; }
+
+button, input { font: inherit; color: inherit; }
+
+::selection { background: var(--c); color: #000; }
+
+:focus-visible {
+  outline: 2px solid var(--c);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+
+/* ==========================================================================
+   2. LOADER — "Sharing Spinner"
+   --------------------------------------------------------------------------
+   Portado 1:1 do componente de referência (disco vermelho girando com
+   três nós e núcleo central). O tamanho é controlado por `font-size` do
+   .loader (16px = 96px de diâmetro; 12px no mobile).
+
+   Mapeamento do JSX/HTML original:
+     .loader      -> palco que centraliza e escala a animação
+     .sharingon   -> disco vermelho girando (borda preta de 6px)
+     .ring        -> anel interno (vermelho escuro translúcido)
+     .to          -> nós (bolinhas pretas) nas 3 posições
+     .to::before  -> a "cauda" curva de cada nó
+     .circle      -> núcleo central preto com brilho
+   ========================================================================== */
+
+.loader {
+  font-size: 16px;              /* controla o tamanho de toda a animação */
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+/* ------- disco vermelho girando ------- */
+.sharingon {
+  position: relative;
+  width: 6em;
+  height: 6em;
+  background-color: var(--c);
+  border: 6px solid #000;
+  border-radius: 50%;
+  animation: rot 1s ease-in-out infinite;
+}
+
+/* ------- anel interno ------- */
+.ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3.5em;
+  height: 3.5em;
+  border: 4px solid var(--c-ring);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* ------- nós (bolinhas) ------- */
+.to,
+.circle {
+  position: absolute;
+  width: 0.9em;
+  height: 0.9em;
+  background-color: #000;
+  border-radius: 50%;
+}
+
+.to:nth-child(1) {
+  top: -0.5em;
+  left: 50%;
+  transform: translate(-40%);
+}
+
+.to::before {
+  content: "";
+  position: absolute;
+  top: -0.5em;
+  right: -0.2em;
+  width: 1.1em;
+  height: 0.9em;
+  border-left: 16px solid #000;
+  border-radius: 100% 0 0;
+}
+
+.to:nth-child(2) {
+  bottom: 0.5em;
+  left: -0.35em;
+  transform: rotate(-120deg);
+}
+
+.to:nth-child(3) {
+  bottom: 0.5em;
+  right: -0.35em;
+  transform: rotate(120deg);
+}
+
+/* ------- núcleo central ------- */
+.circle {
+  top: 50%;
+  left: 50%;
+  width: 1em;
+  height: 1em;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 20px 1px;
+}
+
+/* ------- rotação ------- */
+@keyframes rot {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@media (max-width: 480px) {
+  .loader { font-size: 12px; }
+}
+/* ==========================================================================
+   3. SPLASH SCREEN
+   ========================================================================== */
+
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  overflow: hidden;
+  background: #0d0d0d;
+  transition: opacity .55s ease, visibility .55s ease;
+}
+
+.splash.is-hiding {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* o atributo [hidden] precisa vencer o display: grid acima */
+.splash[hidden] { display: none; }
+
+.splash__brand {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 14%;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .34em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.splash__brand span { color: var(--c); }
+
+.splash__hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 9%;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  animation: hint-fade 3s ease-in-out infinite;
+}
+
+@keyframes hint-fade {
+  0%, 100% { opacity: .45; }
+  50%      { opacity: 1; }
+}
+
+
+/* ==========================================================================
+   4. TOPBAR
+   ========================================================================== */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 0 24px 28px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .5s var(--ease) .05s, transform .5s var(--ease) .05s;
+}
+
+body.is-ready .app {
+  opacity: 1;
+  transform: none;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  height: 64px;
+  margin-bottom: 20px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(8, 8, 8, .92), rgba(8, 8, 8, .72));
+  backdrop-filter: blur(12px);
+}
+
+/* --- marca ------------------------------------------------------------ */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.brand__mark {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 3px;
+  background: var(--c);
+  box-shadow: 0 0 0 4px var(--c-dim), 0 0 18px rgba(247, 151, 29, .5);
+}
+
+.brand__name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.brand__name span { color: var(--c); }
+
+/* selo REC: ponto que pisca + rótulo */
+.head-rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px 9px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-full);
+  background: var(--c-dim);
+}
+
+.head-rec .record {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 10px var(--c);
+  animation: rec-blink 1s step-end infinite;
+}
+
+.head-rec .record-text {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: .2em;
+  line-height: 1;
+  color: var(--c);
+}
+
+@keyframes rec-blink {
+  0%, 49%   { opacity: 1; }
+  50%, 74%  { opacity: .15; }
+  75%, 100% { opacity: 1; }
+}
+
+/* --- status ------------------------------------------------------------ */
+.topbar__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .55;
+}
+
+.chip[data-state="ok"]   { color: var(--c); border-color: var(--c-line); background: var(--c-dim); }
+.chip[data-state="ok"]::before { opacity: 1; box-shadow: 0 0 10px var(--c); }
+.chip[data-state="warn"] { color: var(--text); }
+.chip[data-state="warn"]::before { background: var(--c); opacity: 1; animation: pulse 1.4s var(--ease) infinite; }
+.chip[data-state="err"]  { color: var(--danger); border-color: rgba(255, 95, 86, .3); }
+.chip[data-state="err"]::before { background: var(--danger); opacity: 1; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .35; transform: scale(.7); }
+}
+
+/* ==========================================================================
+   5. PALCO (grade de vídeos) + ROSTER
+   ========================================================================== */
+
+.stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 264px;
+  gap: 24px;
+  align-items: stretch;   /* a grade ocupa a altura disponível */
+  flex: 1 1 auto;
+  min-height: calc(100vh - 190px);
+}
+
+/* --- grade de tiles ---------------------------------------------------- */
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 12px;
+  min-height: 320px;
+}
+
+.grid.is-empty {
+  display: grid;
+  grid-template-columns: 1fr;
+  place-items: center;
+  align-content: center;
+}
+
+/* estado vazio: só aparece quando não há nenhum tile */
+.grid:not(.is-empty) .grid__empty { display: none; }
+
+.grid__empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 340px;
+  padding: 40px 24px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.grid__empty svg {
+  width: 34px;
+  height: 34px;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+
+.grid__empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.grid__empty-hint { color: var(--text-3); font-size: 13px; }
+.grid__empty-hint strong { color: var(--c); font-weight: 600; }
+
+/* --- tile -------------------------------------------------------------- */
+.tile {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 220px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: #000;
+  box-shadow: var(--shadow);
+  transition: border-color .25s var(--ease), transform .25s var(--ease), box-shadow .25s var(--ease);
+}
+
+.tile:hover { border-color: var(--surface-3); }
+
+.tile--screen {
+  border-color: var(--c-line);
+  box-shadow: var(--shadow), 0 0 0 1px rgba(247, 151, 29, .08);
+}
+
+/* Layout "palco": quando alguém compartilha a tela, ela vira o protagonista
+   (ocupa toda a largura) e as câmeras ficam numa faixa centralizada abaixo. */
+.grid.has-screen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 200px));
+  justify-content: center;
+  align-content: center;
+}
+
+.grid.has-screen .tile--screen {
+  grid-column: 1 / -1;
+  /* largura derivada da altura disponível (sem % cíclico) -> sem tarja preta */
+  width: min(100%, calc(50vh * 16 / 9));
+  aspect-ratio: 16 / 9;
+  min-width: 0;
+  justify-self: center;
+}
+
+.grid.has-screen .tile--camera,
+.grid.has-screen .tile--local {
+  min-width: 0;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+.tile__video,
+.tile__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  display: block;
+}
+
+/* o vídeo local fica sobre o canvas (o canvas só é usado no remoto) */
+.tile--local .tile__canvas { display: none; }
+.tile:not(.tile--local) .tile__video { display: none; }
+
+.tile__placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--text-3);
+  background: radial-gradient(circle at 50% 38%, #17171a, #0c0c0e);
+}
+
+/* assim que houver imagem, o placeholder some */
+.tile.is-live .tile__placeholder { display: none; }
+
+.tile__meta {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.tile__name,
+.tile__tag {
+  padding: 4px 10px;
+  border-radius: var(--r-full);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  backdrop-filter: blur(8px);
+}
+
+.tile__name {
+  max-width: 62%;
+  background: rgba(8, 8, 8, .68);
+  color: var(--text);
+  border: 1px solid var(--line-soft);
+}
+
+.tile__tag {
+  margin-left: auto;
+  /* fundo escuro + blur: legível sobre qualquer conteúdo da mídia */
+  background: rgba(8, 8, 8, .68);
+  border: 1px solid var(--c-line);
+  color: var(--c);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: .14em;
+}
+
+/* selo "ao vivo" no tile de tela compartilhada */
+.tile__live {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--r-full);
+  background: rgba(8, 8, 8, .68);
+  border: 1px solid var(--c-line);
+  backdrop-filter: blur(8px);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  color: var(--c);
+}
+
+.tile--screen.is-live .tile__live { display: inline-flex; }
+
+.tile__live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 8px var(--c);
+  animation: pulse 1.6s var(--ease) infinite;
+}
+
+/* --- roster ------------------------------------------------------------ */
+.roster {
+  position: sticky;
+  top: 84px;
+  align-self: start;
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+}
+
+.roster__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.roster__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  background: var(--c-dim);
+  border: 1px solid var(--c-line);
+  color: var(--c);
+  font-size: 10.5px;
+  letter-spacing: 0;
+}
+
+.roster__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.roster__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  margin: 0 -8px;
+  border-radius: var(--r-sm);
+  transition: background .18s var(--ease);
+}
+
+.roster__item:hover { background: var(--surface-2); }
+
+.roster__avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+.roster__item:first-child .roster__avatar {
+  background: var(--c-dim);
+  border-color: var(--c-line);
+  color: var(--c);
+}
+
+.roster__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.roster__tags {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  color: var(--c);
+  white-space: pre;
+}
+
+.roster__empty {
+  padding: 10px 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+/* --- código da sala (útil fora do Discord) ---------------------------- */
+.roomcode {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.roomcode__label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.roomcode__row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.roomcode__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--c);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roomcode__btn {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .18s var(--ease), color .18s var(--ease), border-color .18s var(--ease);
+}
+
+.roomcode__btn:hover {
+  background: var(--c-dim);
+  border-color: var(--c-line);
+  color: var(--c);
+}
+
+.roster__note {
+  margin-top: 14px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* ==========================================================================
+   6. CONTROLES
+   ========================================================================== */
+
+.controls {
+  position: sticky;
+  bottom: 20px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 24px auto 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  background: rgba(15, 15, 16, .86);
+  backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-lg);
+}
+
+.ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 42px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -.005em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .18s var(--ease), color .18s var(--ease), border-color .18s var(--ease), transform .18s var(--ease);
+}
+
+.ctl:hover { background: var(--surface-2); }
+.ctl:active { transform: scale(.97); }
+.ctl:disabled { opacity: .4; cursor: not-allowed; }
+
+.ctl__icon {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.ctl__icon svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* microfone: mostra o ícone "mudo" enquanto estiver silenciado */
+.ctl__icon .ico-mic-off { display: none; }
+#btnMic:not(.is-active) .ico-mic { display: none; }
+#btnMic:not(.is-active) .ico-mic-off { display: block; }
+
+/* estado ativo: laranja */
+.ctl.is-active {
+  background: var(--c);
+  border-color: var(--c);
+  color: #140c02;
+}
+
+.ctl.is-active:hover { background: var(--c-strong); }
+
+/* sair da sala: discreto, só fica vermelho no hover */
+.ctl--danger { color: var(--text-2); }
+.ctl--danger:hover { background: rgba(255, 95, 86, .1); color: var(--danger); }
+
+.ctl--danger .ctl__icon { display: none; }
+
+body.has-left .controls { opacity: .45; pointer-events: none; }
+
+/* ==========================================================================
+   7. TOASTS
+   ========================================================================== */
+
+.toasts {
+  position: fixed;
+  right: 20px;
+  bottom: 88px;   /* acima da barra de controles */
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(360px, calc(100vw - 40px));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: var(--shadow-lg);
+  animation: toast-in .26s var(--ease) both;
+}
+
+.toast::before {
+  content: "";
+  width: 3px;
+  align-self: stretch;
+  border-radius: 2px;
+  background: var(--text-3);
+  flex: 0 0 auto;
+}
+
+.toast.is-out { animation: toast-out .26s var(--ease) both; }
+.toast--success::before { background: var(--c); }
+.toast--error::before   { background: var(--danger); }
+.toast--info::before    { background: var(--text-3); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px) scale(.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(6px) scale(.98); }
+}
+
+/* ==========================================================================
+   8. RESPONSIVIDADE (iframe do Discord: desktop e mobile)
+   ========================================================================== */
+
+@media (max-width: 1080px) {
+  .stage { grid-template-columns: 1fr; }
+  .roster { position: static; }
+}
+
+@media (max-width: 720px) {
+  .app { padding: 0 14px 20px; }
+  .topbar { height: auto; padding: 12px 0; flex-wrap: wrap; gap: 10px; }
+  .brand { width: 100%; }
+  .chip { max-width: 46vw; }
+  .grid { gap: 10px; }
+  .tile { flex: 1 1 100%; min-width: 0; }
+  .grid.has-screen { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  .grid.has-screen .tile--screen { width: 100%; }
+  .grid.has-screen .tile--camera,
+  .grid.has-screen .tile--local { width: 100%; }
+  .controls {
+    position: sticky;
+    bottom: 12px;
+    width: 100%;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    gap: 4px;
+    padding: 6px;
+    border-radius: var(--r-lg);
+  }
+  .ctl { flex: 1 1 0; justify-content: center; padding: 0 8px; gap: 0; }
+  .ctl__label { display: none; }
+  .ctl--danger .ctl__icon { display: grid; }
+  .ctl__icon { width: 20px; height: 20px; }
+  .ctl__icon svg { width: 20px; height: 20px; }
+  .toasts { right: 12px; left: 12px; top: auto; bottom: 78px; width: auto; }
+  .stage { min-height: 0; }
+  .grid.has-screen { align-content: flex-start; }
+}
+
+.noscript {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ==========================================================================
+   9. PREFERÊNCIAS DE MOVIMENTO REDUZIDO
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .12s !important;
+  }
+
+  .splash__hint { opacity: .6; }
+  .ctl:active { transform: none; }
+}

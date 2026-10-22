@@ -1,0 +1,6 @@
+# Dependências do relay opcional (não versionar)
+node_modules/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
