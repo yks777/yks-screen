@@ -47,7 +47,7 @@
   var CONFIG = {
     /* Application ID do Discord (OAuth2 Client ID) — Portal do Desenvolvedor
        > General Information > Application ID. */
-    clientId: params.get('clientId') || 'SEU_CLIENT_ID',
+    clientId: params.get('clientId') || '1562645997308481539',
 
     /* URL REAL do site publicado (ex.: https://seu-user.github.io/yks-screen/).
        É usada para abrir a aba companheira de compartilhamento de tela: ela
@@ -331,7 +331,7 @@
   function describeInitError(err) {
     var msg = (err && err.message) || String(err);
 
-    if (CONFIG.clientId === 'SEU_CLIENT_ID') {
+    if (!CONFIG.clientId || CONFIG.clientId === 'SEU_CLIENT_ID') {
       return 'Application ID do Discord não configurado: troque CONFIG.clientId no app.js pelo ' +
         'Application ID do Portal do Desenvolvedor (ou passe ?clientId=...).';
     }
@@ -1066,7 +1066,7 @@
     if (!list.length) {
       var empty = document.createElement('li');
       empty.className = 'roster__empty';
-      empty.textContent = 'Ninguém na sala ainda.';
+      empty.textContent = 'Vai tomar no cu piranha, ninguém entrou na sala ainda.';
       els.rosterList.appendChild(empty);
     }
   }
