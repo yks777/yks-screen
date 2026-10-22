@@ -53,6 +53,7 @@
   var transport = null;
   var publishing = false;
   var connected = false;
+  var attempts = 0;
   var heartbeat = null;
   var pendingMetas = [];
   var pub = null;
@@ -129,6 +130,7 @@
       onStatus: function (status, detail) {
         if (status === 'connected') {
           connected = true;
+          attempts = 0;
           setStatus('ok', 'Conectado');
           showError('');
           if (el.start) el.start.disabled = false;
@@ -136,7 +138,16 @@
           pendingMetas.splice(0).forEach(function (meta) { transport.sendMeta(meta); });
         } else if (status === 'reconnecting') {
           connected = false;
+          attempts++;
           setStatus('warn', 'Reconectando…');
+          /* Depois de duas tentativas, explica o que está acontecendo: sem
+             isso a aba fica em "Reconectando…" sem dizer por quê. */
+          if (attempts >= 2) {
+            showError('Sem conexão com o transporte de mídia' +
+              (detail ? ' (' + detail + ')' : '') + '. ' +
+              'Se você está no Discord, confira o URL Mapping do transporte ' +
+              'no Portal do Desenvolvedor; fora do Discord, verifique a internet.');
+          }
         } else if (status === 'error') {
           connected = false;
           setStatus('err', 'Sem conexão');
@@ -291,6 +302,41 @@
   }
 
   /* --- início ------------------------------------------------------------- */
+
+  /* A aba companheira NÃO pode ser aberta pelo proxy do Discord.
+
+     O proxy entrega uma CSP rígida (connect-src só libera o próprio host do
+     Discord), então o WebSocket do broker/relay é bloqueado e a aba fica em
+     "Conectando…" para sempre. A captura em si funciona, mas a mídia não
+     sai. Por isso a Activity abre esta aba no site real (CONFIG.activityUrl)
+     e, se ela acabar abrindo no proxy, o aviso aparece com o link certo. */
+  function warnIfBehindProxy() {
+    if (!/\.discordsays\.com$/.test(window.location.hostname)) return;
+
+    var site = (params.get('site') || '').trim();
+    var target = site
+      ? site.replace(/\/+$/, '') + '/capture.html?' + window.location.search.replace(/^\?/, '')
+      : '';
+
+    showError('Esta aba foi aberta pelo proxy do Discord, e a CSP dele bloqueia a ' +
+      'conexão com o broker de mídia (a aba ficaria em "Reconectando…" para sempre).' +
+      (target ? ' Abra o site real: ' + target : ' Abra a aba pelo site publicado ' +
+        '(fora do Discord).'));
+
+    if (target) {
+      try {
+        var link = document.createElement('a');
+        link.href = target;
+        link.textContent = 'Abrir no site real →';
+        link.style.cssText = 'display:inline-block;margin-top:8px;color:#ff2b1b;font-weight:600;';
+        link.target = '_blank';
+        link.rel = 'noopener';
+        if (el.error) el.error.appendChild(link);
+      } catch (e) { /* ignora */ }
+    }
+  }
+
+  warnIfBehindProxy();
 
   if (el.start) el.start.addEventListener('click', startSharing);
   if (el.stop) el.stop.addEventListener('click', function () {

@@ -93,17 +93,32 @@
         opts.onStatus('error', 'Nenhum broker MQTT disponível');
         return;
       }
+
+      /* Quantas falhas seguidas este broker acumulou. O cliente MQTT só
+         reporta "reconnecting" quando o handshake falha (nunca "error"),
+         então sem contar as falhas o app ficava preso no PRIMEIRO broker da
+         lista — que, dentro do Discord, é a URL do proxy. */
+      var failures = 0;
+
       client = new window.MqttClient({
         url: url,
         clientId: 'yks-' + F.randomId(10),
         keepalive: 30,
         onStatus: function (status, detail) {
           if (status === 'connected') {
+            failures = 0;
             if (subscribeMedia) client.subscribe(topicBase + '/media');
             client.subscribe(topicBase + '/ctrl');
             opts.onStatus('connected', url);
           } else if (status === 'reconnecting') {
+            failures++;
             opts.onStatus('reconnecting', detail);
+            /* Duas falhas seguidas e ainda há broker na lista: tenta o
+               próximo. */
+            if (failures >= 2 && urls.length) {
+              try { client.disconnect(); } catch (e) { /* ignora */ }
+              connectNext();
+            }
           } else if (status === 'error') {
             opts.onStatus('error', detail);
             /* tenta o próximo broker */

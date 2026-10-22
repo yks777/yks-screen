@@ -127,6 +127,13 @@ Detalhes:
 - Para o app abrir a aba companheira no **site real** (e não no proxy do Discord),
   configure `CONFIG.activityUrl` em `app.js` com a URL publicada.
 
+> **Por que a aba companheira NÃO pode ser aberta pelo proxy:** o proxy entrega
+> a mesma CSP rígida para todas as páginas que serve (`connect-src` só libera o
+> próprio host do Discord), então o WebSocket do broker é bloqueado e a aba fica
+> em *"Reconectando…"* para sempre — mesmo com a captura funcionando. Por isso
+> `CONFIG.activityUrl` aponta para o site publicado, e a aba mostra um aviso
+> com o link correto caso acabe abrindo pelo proxy.
+
 ### Publicar o site (GitHub Pages)
 
 ```bash

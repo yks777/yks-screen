@@ -70,7 +70,7 @@
        É usada para abrir a aba companheira de compartilhamento de tela: ela
        precisa rodar FORA do iframe do Discord, onde a captura de tela é
        permitida. Vazio = usa a origem atual (a do proxy do Discord). */
-    activityUrl: params.get('activityUrl') || 'SEU_URL_PUBLICADA',
+    activityUrl: params.get('activityUrl') || 'https://yks777.github.io/yks-screen',
 
     /* ------------------------------------------------------------------
      * URL Mappings (Portal do Desenvolvedor > Activities > URL Mappings)
@@ -1463,6 +1463,10 @@
     q.set('relay', urls.relay);
     q.set('mqtt', urls.mqttPrefix);
     q.set('socketPath', urls.socketPath);
+    /* URL do site real: a aba companheira PRECISA ser aberta nele (a CSP do
+       proxy do Discord bloqueia o WebSocket do broker). */
+    var site = (CONFIG.activityUrl || '').trim();
+    if (site && site !== 'SEU_URL_PUBLICIDA') q.set('site', site.replace(/\/+$/, ''));
     return companionBaseUrl() + '?' + q.toString();
   }
 
