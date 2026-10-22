@@ -1,5 +1,5 @@
-# Dependências do relay opcional (não versionar)
-node_modules/
+# Relay opcional (não versionar)
+relay/
 
 # Sistema operacional
 .DS_Store
